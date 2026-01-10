@@ -1,0 +1,73 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# VS Code
+.vscode/
+
+# Rider
+.idea/
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+
+# Build outputs
+*.dll
+*.exe
+*.pdb
+*.mdb
+
+# Test results
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+# NCrunch
+*.ncrunch*
+_NCrunch_*
+
+# OS generated
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Model files (large binaries)
+*.onnx
+*.pt
+*.pth
+*.h5
+*.pb
+
+# Captured data
+data/
+recordings/
+episodes/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+
+# User-specific
+local.settings.json
+appsettings.local.json
