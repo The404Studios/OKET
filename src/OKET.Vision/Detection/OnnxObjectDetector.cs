@@ -1,8 +1,8 @@
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OKET.Core.Types;
-using OKET.Core.Detection;
 using OKET.Core.Interfaces;
+using CoreDetection = OKET.Core.Detection;
 
 namespace OKET.Vision.Detection;
 
@@ -21,37 +21,37 @@ public sealed class OnnxObjectDetector : IObjectDetector
     public bool IsReady => _session != null;
     public float ConfidenceThreshold { get; set; } = 0.5f;
 
-    public IReadOnlyList<DetectionClass> SupportedClasses { get; } = new[]
+    public IReadOnlyList<CoreDetection.DetectionClass> SupportedClasses { get; } = new[]
     {
-        DetectionClass.Zombie,
-        DetectionClass.ZombieHead,
-        DetectionClass.FastZombie,
-        DetectionClass.PoisonZombie,
-        DetectionClass.Headcrab,
-        DetectionClass.Barricade,
-        DetectionClass.BarricadeBoard,
-        DetectionClass.AmmoCrate,
-        DetectionClass.WeaponCrate,
-        DetectionClass.HealthKit,
-        DetectionClass.Survivor,
-        DetectionClass.Prop
+        CoreDetection.DetectionClass.Zombie,
+        CoreDetection.DetectionClass.ZombieHead,
+        CoreDetection.DetectionClass.FastZombie,
+        CoreDetection.DetectionClass.PoisonZombie,
+        CoreDetection.DetectionClass.Headcrab,
+        CoreDetection.DetectionClass.Barricade,
+        CoreDetection.DetectionClass.BarricadeBoard,
+        CoreDetection.DetectionClass.AmmoCrate,
+        CoreDetection.DetectionClass.WeaponCrate,
+        CoreDetection.DetectionClass.HealthKit,
+        CoreDetection.DetectionClass.Survivor,
+        CoreDetection.DetectionClass.Prop
     };
 
     // Maps model class indices to our detection classes
-    private readonly Dictionary<int, DetectionClass> _classMapping = new()
+    private readonly Dictionary<int, CoreDetection.DetectionClass> _classMapping = new()
     {
-        { 0, DetectionClass.Zombie },
-        { 1, DetectionClass.ZombieHead },
-        { 2, DetectionClass.FastZombie },
-        { 3, DetectionClass.PoisonZombie },
-        { 4, DetectionClass.Headcrab },
-        { 5, DetectionClass.Barricade },
-        { 6, DetectionClass.BarricadeBoard },
-        { 7, DetectionClass.AmmoCrate },
-        { 8, DetectionClass.WeaponCrate },
-        { 9, DetectionClass.HealthKit },
-        { 10, DetectionClass.Survivor },
-        { 11, DetectionClass.Prop }
+        { 0, CoreDetection.DetectionClass.Zombie },
+        { 1, CoreDetection.DetectionClass.ZombieHead },
+        { 2, CoreDetection.DetectionClass.FastZombie },
+        { 3, CoreDetection.DetectionClass.PoisonZombie },
+        { 4, CoreDetection.DetectionClass.Headcrab },
+        { 5, CoreDetection.DetectionClass.Barricade },
+        { 6, CoreDetection.DetectionClass.BarricadeBoard },
+        { 7, CoreDetection.DetectionClass.AmmoCrate },
+        { 8, CoreDetection.DetectionClass.WeaponCrate },
+        { 9, CoreDetection.DetectionClass.HealthKit },
+        { 10, CoreDetection.DetectionClass.Survivor },
+        { 11, CoreDetection.DetectionClass.Prop }
     };
 
     public async Task LoadAsync(string modelPath, CancellationToken ct = default)
@@ -90,11 +90,11 @@ public sealed class OnnxObjectDetector : IObjectDetector
         }, ct);
     }
 
-    public async Task<DetectionResult> DetectAsync(Frame frame, CancellationToken ct = default)
+    public async Task<CoreDetection.DetectionResult> DetectAsync(Frame frame, CancellationToken ct = default)
     {
         if (_session == null || _inputNames == null || _outputNames == null)
         {
-            return new DetectionResult { FrameId = frame.Id, Detections = [] };
+            return new CoreDetection.DetectionResult { FrameId = frame.Id, Detections = [] };
         }
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -118,7 +118,7 @@ public sealed class OnnxObjectDetector : IObjectDetector
 
             sw.Stop();
 
-            return new DetectionResult
+            return new CoreDetection.DetectionResult
             {
                 FrameId = frame.Id,
                 InferenceTimeMs = sw.ElapsedMilliseconds,
@@ -154,9 +154,9 @@ public sealed class OnnxObjectDetector : IObjectDetector
         return tensor;
     }
 
-    private List<Detection> ParseYoloOutput(Tensor<float> output, int frameWidth, int frameHeight)
+    private List<CoreDetection.Detection> ParseYoloOutput(Tensor<float> output, int frameWidth, int frameHeight)
     {
-        var detections = new List<Detection>();
+        var detections = new List<CoreDetection.Detection>();
         var dims = output.Dimensions.ToArray();
 
         // YOLO output format: [batch, num_predictions, 5 + num_classes]
@@ -206,9 +206,9 @@ public sealed class OnnxObjectDetector : IObjectDetector
 
             // Map to detection class
             if (!_classMapping.TryGetValue(bestClass, out var detectionClass))
-                detectionClass = DetectionClass.Unknown;
+                detectionClass = CoreDetection.DetectionClass.Unknown;
 
-            detections.Add(new Detection
+            detections.Add(new CoreDetection.Detection
             {
                 Class = detectionClass,
                 Confidence = confidence,
@@ -222,7 +222,7 @@ public sealed class OnnxObjectDetector : IObjectDetector
         return ApplyNms(detections, 0.45f);
     }
 
-    private float CalculatePriority(DetectionClass cls, float confidence, float cx, float cy,
+    private float CalculatePriority(CoreDetection.DetectionClass cls, float confidence, float cx, float cy,
         int frameWidth, int frameHeight)
     {
         // Priority based on:
@@ -232,11 +232,11 @@ public sealed class OnnxObjectDetector : IObjectDetector
 
         float classPriority = cls switch
         {
-            DetectionClass.FastZombie => 1.5f,
-            DetectionClass.Zombie => 1.0f,
-            DetectionClass.PoisonZombie => 1.2f,
-            DetectionClass.Headcrab => 0.8f,
-            DetectionClass.ZombieHead => 1.3f,
+            CoreDetection.DetectionClass.FastZombie => 1.5f,
+            CoreDetection.DetectionClass.Zombie => 1.0f,
+            CoreDetection.DetectionClass.PoisonZombie => 1.2f,
+            CoreDetection.DetectionClass.Headcrab => 0.8f,
+            CoreDetection.DetectionClass.ZombieHead => 1.3f,
             _ => 0.5f
         };
 
@@ -251,13 +251,13 @@ public sealed class OnnxObjectDetector : IObjectDetector
         return classPriority * confidence * (0.5f + 0.5f * positionBonus);
     }
 
-    private List<Detection> ApplyNms(List<Detection> detections, float iouThreshold)
+    private List<CoreDetection.Detection> ApplyNms(List<CoreDetection.Detection> detections, float iouThreshold)
     {
         if (detections.Count == 0) return detections;
 
         // Sort by confidence
         var sorted = detections.OrderByDescending(d => d.Confidence).ToList();
-        var keep = new List<Detection>();
+        var keep = new List<CoreDetection.Detection>();
         var suppressed = new HashSet<int>();
 
         for (int i = 0; i < sorted.Count; i++)

@@ -55,7 +55,7 @@ public sealed class CognitiveAgent : IDisposable
 
     public bool IsRunning => _isRunning;
     public GameState? CurrentState => _lastState;
-    public BeliefState? CurrentBelief => _cognitiveController.CurrentBelief;
+    public BeliefState? CurrentBelief => _cognitiveController.CommittedBelief;
     public InteroceptiveState? CurrentFeeling => _cognitiveController.CurrentFeeling;
     public PerformanceMonitor Performance => _perfMonitor;
 
@@ -280,7 +280,7 @@ public sealed class CognitiveAgent : IDisposable
         // Periodic diagnostics
         if (_perfMonitor.TotalFrames % 150 == 0)
         {
-            var belief = _cognitiveController.CurrentBelief;
+            var belief = _cognitiveController.CommittedBelief;
             var feeling = _cognitiveController.CurrentFeeling;
 
             _logger.LogDebug(
@@ -317,7 +317,7 @@ public sealed class CognitiveAgent : IDisposable
 
     private StepOutcome CalculateOutcome(GameState state)
     {
-        var belief = _cognitiveController.CurrentBelief;
+        var belief = _cognitiveController.CommittedBelief;
         int healthDelta = _lastState != null ? state.Hud.Health - _lastState.Hud.Health : 0;
 
         float reward = 0f;
