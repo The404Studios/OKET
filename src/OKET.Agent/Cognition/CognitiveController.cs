@@ -4,6 +4,7 @@ using OKET.Core.Audio;
 using OKET.Core.Actions;
 using OKET.Core.Cognition;
 using OKET.Core.Interfaces;
+using OKET.Core.Operators;
 using OKET.Agent.Fusion;
 using OKET.Agent.Decision;
 
@@ -44,6 +45,10 @@ public sealed class CognitiveController
     private readonly ZScoreComputer _zScoreComputer = new();
     private readonly BeliefLock _beliefLock = new();
 
+    // Operator algebra components
+    private readonly CueRegistry _cueRegistry = CueRegistry.CreateDefault();
+    private readonly BindingValidator _bindingValidator = new();
+
     private readonly IPolicy _policy;
     private readonly SkillExecutor _skillExecutor;
 
@@ -54,12 +59,21 @@ public sealed class CognitiveController
     private CommittedState? _committedState;
     private ActionPlan? _lastPlan;
 
+    // Operator state
+    private BindState _currentBindState = BindState.Separate;
+    private GateContext _currentGateContext;
+    private float _lastStrainBeforeDiscount;
+    private float _lastOutcomeTrend;
+
     public BeliefState? RawBelief => _rawBelief;
     public BeliefState? CommittedBelief => _committedBelief;
     public InteroceptiveState? CurrentFeeling => _currentFeeling;
     public CommittedState? CurrentCommitment => _committedState;
     public ZScoreStack ZScores => _zScores;
     public BeliefLock BeliefLock => _beliefLock;
+    public CueRegistry CueRegistry => _cueRegistry;
+    public BindState CurrentBindState => _currentBindState;
+    public GateContext CurrentGateContext => _currentGateContext;
 
     public CognitiveController(IPolicy policy, SkillExecutor skillExecutor)
     {
@@ -69,9 +83,14 @@ public sealed class CognitiveController
 
     /// <summary>
     /// Process one cognitive cycle with correct data flow.
+    /// Integrates operator algebra for validated information flow.
     /// </summary>
     public ActionPlan Process(GameState gameState, AudioSnapshot audioSnapshot)
     {
+        // Track previous state for credit assignment
+        float prevStrain = _zScores.SystemStrain;
+        float prevOutcome = _currentFeeling?.OutcomeTrend ?? 0f;
+
         // === STAGE 1: Z-SCORE STACK (Z₀ → Z₁ → Z₂/Z₃ → Z₄) ===
         var zScoreInputs = _zScoreComputer.ComputeInputs(gameState, audioSnapshot, _lastPlan);
         _zScores.Update(zScoreInputs);
@@ -91,14 +110,36 @@ public sealed class CognitiveController
             _zScores.Z2_BeliefStability,     // Z₂ as input
             _zScores.Z3_ControlEfficacy);    // Z₃ as input
 
+        // === STAGE 3.5: CUE EVALUATION ===
+        // Evaluate cues to get strain discount
+        // Cues that reliably predict survival earn the right to reduce strain pressure
+        float cueStrainDiscount = _cueRegistry.Evaluate(_zScores, _currentFeeling, _rawBelief);
+        _lastStrainBeforeDiscount = _zScores.SystemStrain;
+
         // === STAGE 4: MODULATE BELIEF BASED ON FEELING ===
         var modulatedBelief = ModulateBelief(_rawBelief, _currentFeeling);
+
+        // === STAGE 4.5: UPDATE BIND STATE ===
+        // Track information binding topology
+        _currentBindState = DetermineBindState(modulatedBelief, _currentFeeling, _committedState);
 
         // === STAGE 5: POLICY DECISION (proposed mode) ===
         var (proposedMode, baseConfidence) = _policy.Decide(gameState);
 
         // Get proposed target
         int? proposedTargetId = gameState.Detections.PrimaryThreat?.TrackId;
+
+        // === STAGE 5.5: BUILD GATE CONTEXT + VALIDATE ===
+        // Build context for gate validation
+        bool isInhibited = _currentFeeling.ValidityCompromised && _currentFeeling.ShouldHesitate;
+        _currentGateContext = BindingValidator.BuildContext(
+            _currentBindState,
+            _currentFeeling.Validity,
+            _currentFeeling.PerceptionTrust,
+            _zScores.SystemStrain - cueStrainDiscount, // Apply cue discount
+            isInhibited,
+            _currentFeeling.OutcomeTrend,
+            _currentFeeling.MustActNow);
 
         // === STAGE 6: BELIEF LOCK / HYSTERESIS GATE ===
         // This prevents thrashing - won't switch unless new state wins by margin for duration
@@ -111,9 +152,28 @@ public sealed class CognitiveController
         _committedBelief = _committedState.Belief;
         var committedMode = _committedState.Mode;
 
-        // === STAGE 7: FEELING-MODULATED OVERRIDES ===
-        // Even with hysteresis, some situations override
-        if (_currentFeeling.MustActNow && committedMode == StrategicMode.Idle)
+        // === STAGE 6.5: CREDIT ASSIGNMENT ===
+        // Record outcome for cues that fired - did this posture survive the sink?
+        float strainDelta = _zScores.SystemStrain - prevStrain;
+        float outcomeDelta = _currentFeeling.OutcomeTrend - prevOutcome;
+        bool survived = !_committedState.ForcedUnlock && _currentFeeling.Validity > 0.35f;
+        _cueRegistry.RecordOutcome(survived, strainDelta, outcomeDelta);
+        _lastOutcomeTrend = outcomeDelta;
+
+        // === STAGE 7: GATE-VALIDATED OVERRIDES ===
+        // Validate actions through operator algebra
+        var emitValidation = _bindingValidator.Validate(GateType.Emit, _currentGateContext);
+        var yieldValidation = _bindingValidator.Validate(GateType.Yield, _currentGateContext);
+
+        if (!emitValidation.Permitted && yieldValidation.Permitted)
+        {
+            // Gate says yield - be defensive
+            if (committedMode != StrategicMode.Kite && committedMode != StrategicMode.Unstick)
+            {
+                committedMode = StrategicMode.Kite;
+            }
+        }
+        else if (_currentFeeling.MustActNow && committedMode == StrategicMode.Idle)
         {
             // Urgency override - can't stay idle
             committedMode = _committedBelief.ThreatLevel > 0.5f ? StrategicMode.Kite : StrategicMode.Fight;
@@ -136,6 +196,32 @@ public sealed class CognitiveController
 
         _lastPlan = plan;
         return plan;
+    }
+
+    /// <summary>
+    /// Determine bind state based on cognitive signals.
+    /// </summary>
+    private BindState DetermineBindState(
+        BeliefState belief,
+        InteroceptiveState feeling,
+        CommittedState? commitment)
+    {
+        // Absent: validity compromised + inhibited
+        if (feeling.ValidityCompromised && feeling.ShouldHesitate)
+            return BindState.Absent;
+
+        // Inherited: committed, locked, high validity
+        if (commitment?.IsLocked == true &&
+            commitment.FramesSinceCommit > 10 &&
+            feeling.Validity > 0.6f)
+            return BindState.Inherited;
+
+        // Associated: has commitment but not fully locked
+        if (commitment != null && belief.Confidence > 0.5f)
+            return BindState.Associated;
+
+        // Separate: raw observation, not bound
+        return BindState.Separate;
     }
 
     private BeliefState ModulateBelief(BeliefState belief, InteroceptiveState feeling)
@@ -220,6 +306,7 @@ public sealed class CognitiveController
         _committedBelief = null;
         _currentFeeling = null;
         _lastPlan = null;
+        _currentBindState = BindState.Separate;
     }
 
     /// <summary>
@@ -237,13 +324,17 @@ public sealed class CognitiveController
 
         var feelingInfo = _currentFeeling?.GetSummary() ?? "Feeling: none";
         var zInfo = _zScores.GetDiagnostics();
+        var cueInfo = _cueRegistry.GetSummary();
 
         return $"""
             === COGNITIVE STATE ===
             {beliefInfo}
             {lockInfo}
+            BindState: {_currentBindState}
+            GateContext: {_currentGateContext}
             {feelingInfo}
             {zInfo}
+            {cueInfo}
             =======================
             """;
     }
