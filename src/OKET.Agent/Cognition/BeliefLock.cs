@@ -93,8 +93,8 @@ public sealed class BeliefLock
         // Check for urgency override
         bool urgentOverride = feeling.Urgency > UrgencyOverride;
 
-        // CHECK FOR FORCED UNLOCK: strain rising + outcomes worsening
-        bool forcedUnlock = CheckForcedUnlock();
+        // CHECK FOR FORCED UNLOCK: strain rising + outcomes worsening OR validity compromised
+        bool forcedUnlock = CheckForcedUnlock() || CheckValidityUnlock(feeling);
         if (forcedUnlock)
         {
             ForcedUnlockTriggered = true;
@@ -106,13 +106,13 @@ public sealed class BeliefLock
         if (_committedBelief == null)
         {
             Commit(proposedBelief, proposedMode, proposedTargetId, "cold_start");
-            return GetCommittedState();
+            return GetCommittedState(feeling);
         }
 
         // Check if locked (unless forced unlock or urgent)
         if (IsLocked && !urgentOverride && !forcedUnlock)
         {
-            return GetCommittedState();
+            return GetCommittedState(feeling);
         }
 
         // Evaluate the proposal
@@ -128,7 +128,7 @@ public sealed class BeliefLock
         if (evaluation == ProposalResult.Accept)
         {
             Commit(proposedBelief, proposedMode, proposedTargetId, "clear_win");
-            return GetCommittedState();
+            return GetCommittedState(feeling);
         }
         else if (evaluation == ProposalResult.Candidate)
         {
@@ -143,7 +143,7 @@ public sealed class BeliefLock
                 {
                     Commit(proposedBelief, proposedMode, proposedTargetId,
                         forcedUnlock ? "forced_unlock" : "candidate_won");
-                    return GetCommittedState();
+                    return GetCommittedState(feeling);
                 }
             }
             else
@@ -161,7 +161,7 @@ public sealed class BeliefLock
             _candidateFrames = 0;
         }
 
-        return GetCommittedState();
+        return GetCommittedState(feeling);
     }
 
     private void UpdateHistory(float strain, float outcome)
@@ -211,6 +211,24 @@ public sealed class BeliefLock
         bool outcomesWorsening = OutcomeTrend < -OutcomeDeclineThreshold;
 
         return strainRising && outcomesWorsening;
+    }
+
+    /// <summary>
+    /// Check if we should force unlock due to compromised validity.
+    /// Validity is the explicit signal that posture can't carry current load.
+    /// </summary>
+    private bool CheckValidityUnlock(InteroceptiveState feeling)
+    {
+        // Cooldown between forced unlocks
+        if (_framesSinceLastUnlock < MinFramesBetweenUnlocks)
+            return false;
+
+        // Only trigger on validity signal if we've been locked for a while
+        // (to give posture a chance to prove itself)
+        if (FramesSinceCommit < MinLockDuration * 2)
+            return false;
+
+        return feeling.ValidityCompromised;
     }
 
     private ProposalResult EvaluateProposal(
@@ -287,7 +305,7 @@ public sealed class BeliefLock
     /// <summary>Reason for last commit (for diagnostics).</summary>
     public string LastCommitReason { get; private set; } = "";
 
-    private CommittedState GetCommittedState()
+    private CommittedState GetCommittedState(InteroceptiveState feeling)
     {
         return new CommittedState
         {
@@ -301,6 +319,8 @@ public sealed class BeliefLock
             ForcedUnlock = ForcedUnlockTriggered,
             StrainTrend = StrainTrend,
             OutcomeTrend = OutcomeTrend,
+            Validity = feeling.Validity,
+            ValidityCompromised = feeling.ValidityCompromised,
             CommitReason = LastCommitReason
         };
     }
@@ -355,5 +375,7 @@ public sealed record CommittedState
     public bool ForcedUnlock { get; init; }
     public float StrainTrend { get; init; }
     public float OutcomeTrend { get; init; }
+    public float Validity { get; init; }
+    public bool ValidityCompromised { get; init; }
     public string CommitReason { get; init; } = "";
 }

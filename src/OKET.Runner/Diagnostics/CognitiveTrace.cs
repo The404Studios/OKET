@@ -63,6 +63,8 @@ public sealed class CognitiveTrace
                 LearningRate = feeling.LearningRateModifier,
                 ShouldHesitate = feeling.ShouldHesitate,
                 MustActNow = feeling.MustActNow,
+                Validity = feeling.Validity,
+                ValidityCompromised = feeling.ValidityCompromised,
 
                 // Emotional labels (for logging only)
                 Anxiety = feeling.Anxiety,
@@ -150,8 +152,14 @@ public sealed class CognitiveTrace
                 _ => "NEUTRAL"
             };
 
+            var validityStatus = latest.ValidityCompromised ? "COMPROMISED" : "OK";
+
             sb.AppendLine("┌─────────────────────────────────────────────────┐");
             sb.AppendLine($"│ FEELING: {dominant,-38} │");
+            sb.AppendLine("├─────────────────────────────────────────────────┤");
+            sb.AppendLine("│ VALIDITY (posture load capacity)                │");
+            sb.AppendLine($"│ Validity         {Bar01(latest.Validity)} {latest.Validity,5:F2} │");
+            sb.AppendLine($"│ Status: {validityStatus,-40} │");
             sb.AppendLine("├─────────────────────────────────────────────────┤");
             sb.AppendLine("│ CONTROL KNOBS                                   │");
             sb.AppendLine($"│ PerceptionTrust  {Bar01(latest.PerceptionTrust / 1.5f)} {latest.PerceptionTrust,5:F2} │");
@@ -160,6 +168,7 @@ public sealed class CognitiveTrace
             sb.AppendLine($"│ LearningRate     {Bar01(latest.LearningRate / 2f)} {latest.LearningRate,5:F2} │");
             sb.AppendLine("├─────────────────────────────────────────────────┤");
             sb.AppendLine($"│ Gates: {(latest.ShouldHesitate ? "[HESITATE]" : "          ")} {(latest.MustActNow ? "[ACT NOW]" : "         ")}  │");
+            sb.AppendLine($"│        {(latest.ValidityCompromised ? "[VALIDITY LOW]" : "              ")}                   │");
             sb.AppendLine($"│ GlobalStability  {Bar01(latest.GlobalStability)} {latest.GlobalStability,5:F2} │");
             sb.AppendLine("└─────────────────────────────────────────────────┘");
 
@@ -266,7 +275,7 @@ public sealed class CognitiveTrace
             var sb = new StringBuilder();
             sb.AppendLine("timestamp,frame,z0_vision,z0_audio,z1_agree,z2_stable,z3_control,z4_coher,strain," +
                           "pred_err,threat,control_conf,sensory_align,outcome_trend,global_stab," +
-                          "perc_trust,commit_conf,action_speed,learn_rate,hesitate,act_now," +
+                          "perc_trust,commit_conf,action_speed,learn_rate,hesitate,act_now,validity,validity_compromised," +
                           "anxiety,frustration,focus,vigilance," +
                           "committed_mode,executed_mode,locked,forced_unlock,commit_reason");
 
@@ -275,7 +284,7 @@ public sealed class CognitiveTrace
                 sb.AppendLine($"{e.Timestamp:O},{e.FrameNumber}," +
                               $"{e.Z0_VisionMotion:F4},{e.Z0_AudioLevel:F4},{e.Z1_Agreement:F4},{e.Z2_Stability:F4},{e.Z3_Control:F4},{e.Z4_Coherence:F4},{e.SystemStrain:F4}," +
                               $"{e.PredictionError:F4},{e.ThreatPressure:F4},{e.ControlConfidence:F4},{e.SensoryAlignment:F4},{e.OutcomeTrend:F4},{e.GlobalStability:F4}," +
-                              $"{e.PerceptionTrust:F4},{e.CommitmentConf:F4},{e.ActionSpeed:F4},{e.LearningRate:F4},{e.ShouldHesitate},{e.MustActNow}," +
+                              $"{e.PerceptionTrust:F4},{e.CommitmentConf:F4},{e.ActionSpeed:F4},{e.LearningRate:F4},{e.ShouldHesitate},{e.MustActNow},{e.Validity:F4},{e.ValidityCompromised}," +
                               $"{e.Anxiety:F4},{e.Frustration:F4},{e.Focus:F4},{e.Vigilance:F4}," +
                               $"{e.CommittedMode},{e.ExecutedMode},{e.IsLocked},{e.ForcedUnlock},{e.CommitReason}");
             }
@@ -360,6 +369,8 @@ public sealed class CognitiveTrace
         public float LearningRate { get; init; }
         public bool ShouldHesitate { get; init; }
         public bool MustActNow { get; init; }
+        public float Validity { get; init; }
+        public bool ValidityCompromised { get; init; }
 
         // Emotions
         public float Anxiety { get; init; }

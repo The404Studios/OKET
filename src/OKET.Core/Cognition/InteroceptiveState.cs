@@ -21,6 +21,7 @@ namespace OKET.Core.Cognition;
 ///   - LearningRateModifier: scales RL step size / replay weighting / memory write rate
 ///   - ShouldHesitate: gate which modes are allowed
 ///   - MustActNow: urgency override
+///   - Validity: ability of current posture to carry load (informs forced unlock)
 /// </summary>
 public sealed record InteroceptiveState
 {
@@ -132,6 +133,40 @@ public sealed record InteroceptiveState
             SystemStrain * 0.1f,
             0f, 1f);
 
+    // === VALIDITY SIGNAL ===
+
+    /// <summary>
+    /// Validity Signal [0, 1]: ability of current posture to carry load.
+    ///
+    /// This is the explicit formalization of "is this belief/mode working?"
+    /// High validity = posture is sustainable, actions are effective, strain is manageable.
+    /// Low validity = posture is failing, should consider forced unlock.
+    ///
+    /// Formula:
+    ///   + outcome trend (are things improving?)
+    ///   + belief stability (is posture coherent?)
+    ///   + control efficacy (are actions working?)
+    ///   - system strain (is load too high?)
+    ///
+    /// Used by BeliefLock to inform forced unlock decisions.
+    /// </summary>
+    public float Validity =>
+        Math.Clamp(
+            0.5f +                                           // baseline
+            Math.Max(0, OutcomeTrend) * 0.25f +              // improving outcomes boost
+            BeliefStability * 0.2f +                         // stable beliefs boost
+            ControlConfidence * 0.2f +                       // effective control boost
+            SensoryAlignment * 0.1f -                        // sensory agreement boost
+            SystemStrain * 0.15f -                           // strain penalty
+            Math.Max(0, -OutcomeTrend) * 0.2f,               // declining outcomes penalty
+            0f, 1f);
+
+    /// <summary>
+    /// Whether validity is critically low (posture is failing).
+    /// Can be used as a trigger for forced unlock consideration.
+    /// </summary>
+    public bool ValidityCompromised => Validity < 0.35f;
+
     // === GLOBAL STABILITY ===
 
     /// <summary>
@@ -194,15 +229,17 @@ public sealed record InteroceptiveState
             _ => "NEUTRAL"
         };
 
+        var validityStatus = ValidityCompromised ? "COMPROMISED" : "OK";
+
         return $"""
             Feeling: {dominant}
-              GlobalStability={GlobalStability:F2}, SystemStrain={SystemStrain:F2}
+              Validity={Validity:F2} [{validityStatus}], GlobalStability={GlobalStability:F2}, SystemStrain={SystemStrain:F2}
               Control Knobs:
                 PerceptionTrust={PerceptionTrust:F2}
                 CommitmentConf={CommitmentConfidence:F2}
                 ActionSpeed={ActionSpeedModifier:F2}
                 LearningRate={LearningRateModifier:F2}
-              Gates: Hesitate={ShouldHesitate}, ActNow={MustActNow}
+              Gates: Hesitate={ShouldHesitate}, ActNow={MustActNow}, ValidityCompromised={ValidityCompromised}
             """;
     }
 }
