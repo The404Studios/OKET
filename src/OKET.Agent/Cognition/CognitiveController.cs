@@ -50,6 +50,7 @@ public sealed class CognitiveController
     // Operator algebra components
     private readonly CueRegistry _cueRegistry = CueRegistry.CreateDefault();
     private readonly BindingValidator _bindingValidator = new();
+    private readonly GateController _gateController = new();
 
     // Reference memory (operational understanding)
     private readonly ReferenceBuilder _refBuilder = new();
@@ -86,8 +87,11 @@ public sealed class CognitiveController
     public ReferenceBuilder RefMemory => _refBuilder;
     public float ExpectationGapPressure => _refBuilder.Gaps.TotalGapPressure;
     public FrameIntegrator FrameIntegrator => _frameIntegrator;
+    public GateController GateController => _gateController;
     public float CenterCoherence => _frameIntegrator.Coherence;
     public float CenterPermission => _frameIntegrator.Permission;
+    public float PerceptionModulation => _gateController.PerceptionModulation;
+    public float PredictionModulation => _gateController.PredictionModulation;
 
     public CognitiveController(IPolicy policy, SkillExecutor skillExecutor)
     {
@@ -116,6 +120,8 @@ public sealed class CognitiveController
 
         // === STAGE 2: MULTIMODAL FUSION ===
         // Uses Z₀, Z₁ implicitly through the fusion algorithm
+        // Apply modulation from CENTER (using previous frame's values for causality)
+        _fusion.SetModulation(_gateController.PerceptionModulation, _gateController.PredictionModulation);
         _rawBelief = _fusion.Fuse(gameState, audioSnapshot);
 
         // === STAGE 3: INTEROCEPTION (takes Z₄ as INPUT) ===
@@ -184,7 +190,21 @@ public sealed class CognitiveController
             _zScores.SystemStrain - cueStrainDiscount + gapPressure * 0.3f, // Gaps add to strain
             isInhibited,
             _currentFeeling.OutcomeTrend,
-            _currentFeeling.MustActNow);
+            _currentFeeling.MustActNow,
+            centerPermission: _frameIntegrator.Permission,           // CENTER permission gate
+            centerCoherence: _frameIntegrator.Coherence,             // CENTER frame coherence
+            directionViability: _frameIntegrator.DirectionViability); // CENTER direction check
+
+        // Update the unified gate controller with current state
+        _gateController.UpdateContext(
+            _currentBindState,
+            _currentFeeling.Validity - gapPressure * 0.2f,
+            _currentFeeling.PerceptionTrust,
+            _zScores.SystemStrain - cueStrainDiscount + gapPressure * 0.3f,
+            isInhibited,
+            _currentFeeling.OutcomeTrend,
+            _currentFeeling.MustActNow,
+            integrationState);
 
         // === STAGE 6: BELIEF LOCK / HYSTERESIS GATE ===
         // This prevents thrashing - won't switch unless new state wins by margin for duration
@@ -254,8 +274,31 @@ public sealed class CognitiveController
             committedMode = StrategicMode.Kite;
         }
 
-        // === STAGE 8: SKILL EXECUTION ===
+        // === STAGE 8: SKILL EXECUTION (gated through CENTER) ===
+        // Route through gate controller to validate emission
+        var emissionResult = _gateController.RouteEmission();
         var plan = _skillExecutor.Execute(gameState, committedMode);
+
+        // If emission was denied, apply fallback behavior
+        if (!emissionResult.Permitted || emissionResult.Gate == GateType.Yield)
+        {
+            // Reduce action intensity when yielding
+            plan = plan with
+            {
+                Confidence = plan.Confidence * 0.7f,
+                Reason = plan.Reason + " [gate:yield]"
+            };
+        }
+        else if (emissionResult.Gate == GateType.Block)
+        {
+            // Block offensive actions when blocked
+            plan = plan with
+            {
+                Actions = plan.Actions.Where(a => a.Type != ActionType.Attack).ToList(),
+                Confidence = plan.Confidence * 0.5f,
+                Reason = plan.Reason + " [gate:block]"
+            };
+        }
 
         // === STAGE 8.5: REFERENCE MEMORY - COMMITMENT ===
         // Record commitment and action plan in reference memory
@@ -397,6 +440,7 @@ public sealed class CognitiveController
         var cueInfo = _cueRegistry.GetSummary();
         var refInfo = _refBuilder.GetDiagnostics();
         var centerInfo = _integrationBridge.GetDiagnostics();
+        var gateInfo = _gateController.GetDiagnostics();
 
         return $"""
             === COGNITIVE STATE ===
@@ -405,11 +449,13 @@ public sealed class CognitiveController
             BindState: {_currentBindState}
             GateContext: {_currentGateContext}
             GapPressure: {ExpectationGapPressure:F2}
+            Modulation: perception={PerceptionModulation:F2}, prediction={PredictionModulation:F2}
             {feelingInfo}
             {zInfo}
             {cueInfo}
             {refInfo}
             {centerInfo}
+            {gateInfo}
             =======================
             """;
     }

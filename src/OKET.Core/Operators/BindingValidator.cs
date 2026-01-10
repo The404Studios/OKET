@@ -80,11 +80,20 @@ public sealed class BindingValidator
     /// <summary>
     /// LAW 2: DIRECTION
     /// Operation must not violate directional constraints.
+    /// CENTER permission is the primary directional gate.
     /// </summary>
     private ValidationResult ValidateDirection(GateType gate, GateContext context)
     {
         return gate switch
         {
+            // CENTER says direction is not viable for emission
+            GateType.Emit when context.DirectionViability < -0.3f && !context.UrgencyOverride =>
+                ValidationResult.Deny(gate, "Direction: CENTER rejects direction viability"),
+
+            // CENTER permission too low for emission
+            GateType.Emit when context.CenterPermission < 0.4f && !context.UrgencyOverride =>
+                ValidationResult.Deny(gate, "Direction: CENTER permission insufficient for emit"),
+
             // Emit under high strain without urgency = bad direction
             GateType.Emit when context.Strain > 2.0f && !context.UrgencyOverride =>
                 ValidationResult.Deny(gate, "Direction: Cannot emit under high strain without urgency"),
@@ -93,9 +102,17 @@ public sealed class BindingValidator
             GateType.Emit when context.OutcomeTrend < -0.5f && context.Validity < 0.4f =>
                 ValidationResult.Deny(gate, "Direction: Declining outcomes with weak validity"),
 
+            // Transform requires minimum coherence
+            GateType.Transform when context.CenterCoherence < 0.25f =>
+                ValidationResult.Deny(gate, "Direction: CENTER coherence too low for transform"),
+
             // Transform with very low trust = unreliable direction
             GateType.Transform when context.Trust < 0.5f =>
                 ValidationResult.Deny(gate, "Direction: Trust too low for reliable transform"),
+
+            // Consume requires CENTER approval
+            GateType.Consume when context.CenterPermission < 0.5f =>
+                ValidationResult.Deny(gate, "Direction: CENTER permission insufficient to consume"),
 
             // Consume without trust threshold
             GateType.Consume when context.Trust < 0.6f =>
@@ -153,7 +170,10 @@ public sealed class BindingValidator
         float strain,
         bool inhibited,
         float outcomeTrend,
-        bool urgencyOverride)
+        bool urgencyOverride,
+        float centerPermission = 1f,
+        float centerCoherence = 1f,
+        float directionViability = 0f)
     {
         return new GateContext
         {
@@ -163,7 +183,10 @@ public sealed class BindingValidator
             Strain = strain,
             Inhibited = inhibited,
             OutcomeTrend = outcomeTrend,
-            UrgencyOverride = urgencyOverride
+            UrgencyOverride = urgencyOverride,
+            CenterPermission = centerPermission,
+            CenterCoherence = centerCoherence,
+            DirectionViability = directionViability
         };
     }
 }

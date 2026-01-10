@@ -24,6 +24,20 @@ public sealed class MultimodalFusion
     private DateTime _lastAudioHit;
     private const double HitCorrelationWindowMs = 200;
 
+    // Modulation signals from CENTER
+    private float _perceptionModulation = 1f;
+    private float _predictionModulation = 1f;
+
+    /// <summary>
+    /// Set modulation signals from the CENTER.
+    /// Call before Fuse() each frame.
+    /// </summary>
+    public void SetModulation(float perceptionModulation, float predictionModulation)
+    {
+        _perceptionModulation = Math.Clamp(perceptionModulation, 0.1f, 2f);
+        _predictionModulation = Math.Clamp(predictionModulation, 0.1f, 2f);
+    }
+
     public BeliefState Fuse(GameState gameState, AudioSnapshot audioSnapshot)
     {
         // Extract proposals from each modality
@@ -223,6 +237,16 @@ public sealed class MultimodalFusion
         float aw = audio.Confidence;
         float hw = hud.Confidence;
 
+        // Apply perception modulation from CENTER
+        // Low modulation = be conservative, require higher thresholds
+        // High modulation = be aggressive, trust inputs more
+        float modulationFactor = _perceptionModulation;
+
+        // Modulation affects noisy sources (vision, audio) more than reliable (HUD)
+        vw *= (0.5f + modulationFactor * 0.5f);
+        aw *= (0.5f + modulationFactor * 0.5f);
+        hw *= (0.8f + modulationFactor * 0.2f); // HUD less affected
+
         // Boost agreeing modalities
         if (agreement > 0.7f)
         {
@@ -311,11 +335,15 @@ public sealed class MultimodalFusion
         // Health risk: HUD is authoritative
         float healthRisk = hud.HealthRisk;
 
-        // Overall confidence
-        float confidence = agreement * 0.4f +
-                           (weights.Vision * vision.Confidence +
-                            weights.Audio * audio.Confidence +
-                            weights.Hud * hud.Confidence) * 0.6f;
+        // Overall confidence (modulated by CENTER)
+        float baseConfidence = agreement * 0.4f +
+                               (weights.Vision * vision.Confidence +
+                                weights.Audio * audio.Confidence +
+                                weights.Hud * hud.Confidence) * 0.6f;
+
+        // Apply prediction modulation: low modulation = require higher raw confidence
+        // This prevents over-committing when center says frames disagree
+        float confidence = baseConfidence * (0.6f + _predictionModulation * 0.4f);
 
         return new BeliefState
         {

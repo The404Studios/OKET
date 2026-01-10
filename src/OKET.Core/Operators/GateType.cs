@@ -68,6 +68,7 @@ public enum GateType
 /// 1. Binding is correct (state topology)
 /// 2. Direction is valid (not violating constraints)
 /// 3. Conversation law permits (NAND not triggered)
+/// 4. CENTER permits (frame coherence sufficient)
 /// </summary>
 public readonly struct GateContext
 {
@@ -113,14 +114,37 @@ public readonly struct GateContext
     public bool UrgencyOverride { get; init; }
 
     /// <summary>
+    /// CENTER permission signal [0, 1].
+    /// High = frames are synchronized, action is viable.
+    /// Low = frames disagree, action should be inhibited.
+    /// </summary>
+    public float CenterPermission { get; init; }
+
+    /// <summary>
+    /// CENTER coherence signal [0, 1].
+    /// How well the local/global frames are synchronized.
+    /// </summary>
+    public float CenterCoherence { get; init; }
+
+    /// <summary>
+    /// Direction viability from CENTER [-1, 1].
+    /// Positive = direction supported by both frames.
+    /// </summary>
+    public float DirectionViability { get; init; }
+
+    /// <summary>
     /// Check if a specific gate type can execute in this context.
     /// </summary>
     public bool CanExecute(GateType gate) => gate switch
     {
-        GateType.Activate => !Inhibited && Trust > 0.5f && State != BindState.Absent,
-        GateType.Consume => !Inhibited && State.CanEmit() && Validity > 0.3f,
-        GateType.Transform => !Inhibited && State != BindState.Absent,
-        GateType.Emit => !Inhibited && State.CanEmit() && Validity > 0.35f,
+        GateType.Activate => !Inhibited && Trust > 0.5f && State != BindState.Absent
+                            && CenterPermission > 0.2f,
+        GateType.Consume => !Inhibited && State.CanEmit() && Validity > 0.3f
+                           && CenterPermission > 0.4f,
+        GateType.Transform => !Inhibited && State != BindState.Absent
+                             && CenterCoherence > 0.3f,
+        GateType.Emit => !Inhibited && State.CanEmit() && Validity > 0.35f
+                        && CenterPermission > 0.5f,
         GateType.Yield => true, // Yield is always allowed
         GateType.Block => true, // Block is always allowed
         _ => false
@@ -136,6 +160,9 @@ public readonly struct GateContext
             // Block takes absolute priority
             if (Inhibited) return GateType.Block;
 
+            // CENTER says no - yield
+            if (CenterPermission < 0.3f && !UrgencyOverride) return GateType.Yield;
+
             // Low validity → yield
             if (Validity < 0.35f && !UrgencyOverride) return GateType.Yield;
 
@@ -148,11 +175,16 @@ public readonly struct GateContext
             // Separate state → can only activate (observe)
             if (State == BindState.Separate) return GateType.Activate;
 
-            // Associated with good validity → can emit conditionally
-            if (State == BindState.Associated && Validity > 0.5f) return GateType.Emit;
+            // Direction not viable → transform only (reconsider)
+            if (DirectionViability < 0 && State == BindState.Associated) return GateType.Transform;
 
-            // Inherited → full emit authority
-            if (State == BindState.Inherited) return GateType.Emit;
+            // Associated with good validity AND permission → can emit
+            if (State == BindState.Associated && Validity > 0.5f && CenterPermission > 0.5f)
+                return GateType.Emit;
+
+            // Inherited → full emit authority (but still respect center)
+            if (State == BindState.Inherited && CenterPermission > 0.4f)
+                return GateType.Emit;
 
             // Default: transform/process
             return GateType.Transform;
@@ -171,5 +203,5 @@ public readonly struct GateContext
     };
 
     public override string ToString() =>
-        $"Gate[{State}, V={Validity:F2}, T={Trust:F2}, S={Strain:F2}, Inh={Inhibited}] → {RecommendedGate}";
+        $"Gate[{State}, V={Validity:F2}, T={Trust:F2}, S={Strain:F2}, P={CenterPermission:F2}, Inh={Inhibited}] → {RecommendedGate}";
 }
