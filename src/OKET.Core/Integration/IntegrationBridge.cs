@@ -1,7 +1,6 @@
 namespace OKET.Core.Integration;
 
 using OKET.Core.Cognition;
-using OKET.Core.Normalization;
 
 /// <summary>
 /// Bridges the FrameIntegrator to existing cognitive components.
