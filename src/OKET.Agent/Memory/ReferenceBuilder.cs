@@ -323,6 +323,21 @@ public sealed class ReferenceBuilder
     }
 
     /// <summary>
+    /// Update all memory structures (salience decay, gap decay, pruning).
+    /// Call every frame.
+    /// </summary>
+    /// <param name="currentStrain">Current system strain (Z₄).</param>
+    /// <param name="outcomeTrend">Current outcome trend (for gap recovery).</param>
+    public void Update(float currentStrain = 0f, float outcomeTrend = 0f)
+    {
+        // Update graph with salience decay and strain-weighted pruning
+        _graph.UpdateAll(currentStrain);
+
+        // Update gaps with outcome-aware decay
+        _gapTracker.UpdateAll(outcomeTrend);
+    }
+
+    /// <summary>
     /// Get comprehensive diagnostics.
     /// </summary>
     public string GetDiagnostics()

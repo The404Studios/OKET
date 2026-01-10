@@ -72,6 +72,10 @@ public enum RefType
 /// References are born local (Separate), earn validity through the sink,
 /// and only then get promoted to global structure (Inherited).
 ///
+/// CRITICAL: Demotion is FASTER than promotion.
+/// Reality changes faster than truth stabilizes.
+/// This prevents reference dogma.
+///
 /// This is "thinking's memory" - ears + eyes → coherent references.
 /// </summary>
 public sealed class ReferenceNode
@@ -93,6 +97,13 @@ public sealed class ReferenceNode
     /// Negative when Z₄ rises and outcomes worsen.
     /// </summary>
     public float Validity { get; private set; }
+
+    /// <summary>
+    /// Salience: how "loud" this reference is in working memory.
+    /// Decays over time; refreshed by validation or attention.
+    /// Low-salience references are pruned first.
+    /// </summary>
+    public float Salience { get; private set; }
 
     /// <summary>
     /// Tags attached to this reference.
@@ -128,12 +139,29 @@ public sealed class ReferenceNode
     public int FailureCount { get; private set; }
 
     /// <summary>
+    /// Consecutive failures (resets on success).
+    /// Used for rapid demotion - reality changes fast.
+    /// </summary>
+    public int ConsecutiveFailures { get; private set; }
+
+    /// <summary>
     /// Reliability = successes / (successes + failures).
     /// </summary>
     public float Reliability =>
         ValidationCount + FailureCount > 0
             ? ValidationCount / (float)(ValidationCount + FailureCount)
             : 0.5f;
+
+    // ASYMMETRIC by design - demotion is faster than promotion
+    private const float SuccessValidityRate = 0.15f;      // Slow promotion
+    private const float FailureValidityRate = 0.28f;      // Fast demotion (1.9x faster)
+    private const float SalienceDecayRate = 0.015f;       // Natural salience decay per frame
+    private const float SalienceBoostOnSuccess = 0.25f;   // Boost on successful validation
+    private const float SaliencePenaltyOnFailure = 0.15f; // Penalty on failure
+    private const int MinValidationsForPromotion = 8;     // More evidence needed for promotion
+    private const float PromotionReliability = 0.75f;     // Higher bar for promotion
+    private const float DemotionReliability = 0.45f;      // Easier to demote
+    private const int ConsecutiveFailureDemotion = 2;     // 2 failures = immediate demotion
 
     public ReferenceNode(RefType type, BindState initialBind = BindState.Separate)
     {
@@ -142,7 +170,8 @@ public sealed class ReferenceNode
         TicksCreated = DateTime.UtcNow.Ticks;
         TimeCreated = DateTime.UtcNow;
         Bind = initialBind;
-        Validity = 0.5f; // Start neutral
+        Validity = 0.5f;  // Start neutral
+        Salience = 1.0f;  // Start fully salient
     }
 
     /// <summary>
@@ -153,43 +182,86 @@ public sealed class ReferenceNode
         if (survived)
         {
             ValidationCount++;
-            Validity = Math.Clamp(Validity + validityDelta * 0.2f, 0f, 1f);
+            ConsecutiveFailures = 0; // Reset failure streak
+            Validity = Math.Clamp(Validity + validityDelta * SuccessValidityRate, 0f, 1f);
+            Salience = Math.Min(1f, Salience + SalienceBoostOnSuccess);
             TryPromote();
         }
         else
         {
             FailureCount++;
-            Validity = Math.Clamp(Validity - validityDelta * 0.3f, 0f, 1f);
+            ConsecutiveFailures++;
+            // FASTER demotion - reality changes faster than truth stabilizes
+            Validity = Math.Clamp(Validity - validityDelta * FailureValidityRate, 0f, 1f);
+            Salience = Math.Max(0.1f, Salience - SaliencePenaltyOnFailure);
             TryDemote();
         }
     }
 
     /// <summary>
+    /// Apply natural salience decay (call each frame).
+    /// Low-salience references are pruned first.
+    /// </summary>
+    public void ApplySalienceDecay()
+    {
+        Salience = Math.Max(0f, Salience - SalienceDecayRate);
+    }
+
+    /// <summary>
+    /// Refresh salience (when reference is accessed/attended to).
+    /// </summary>
+    public void RefreshSalience()
+    {
+        Salience = Math.Min(1f, Salience + 0.1f);
+    }
+
+    /// <summary>
     /// Try to promote this reference to higher bind state.
+    /// Promotion is SLOW - requires substantial evidence.
     /// </summary>
     private void TryPromote()
     {
-        if (ValidationCount < 5) return;
-        if (Reliability < 0.7f) return;
+        // Promotion requires substantial evidence
+        if (ValidationCount < MinValidationsForPromotion) return;
+        if (Reliability < PromotionReliability) return;
+        if (ConsecutiveFailures > 0) return; // No promotion with recent failures
 
-        if (Bind == BindState.Separate && Reliability > 0.6f)
+        if (Bind == BindState.Separate && Reliability > 0.65f)
+        {
             Bind = BindState.Associated;
-        else if (Bind == BindState.Associated && Reliability > 0.8f && ValidationCount > 10)
+        }
+        else if (Bind == BindState.Associated &&
+                 Reliability > 0.85f &&
+                 ValidationCount > MinValidationsForPromotion * 2)
+        {
             Bind = BindState.Inherited;
+        }
     }
 
     /// <summary>
     /// Try to demote this reference to lower bind state.
+    /// Demotion is FAST - reality changes faster than truth stabilizes.
     /// </summary>
     private void TryDemote()
     {
-        if (Reliability > 0.4f) return;
+        // Consecutive failures trigger immediate demotion
+        if (ConsecutiveFailures >= ConsecutiveFailureDemotion)
+        {
+            // Harsh: drop one level immediately
+            if (Bind == BindState.Inherited) Bind = BindState.Associated;
+            else if (Bind == BindState.Associated) Bind = BindState.Separate;
+            else if (Bind == BindState.Separate) Bind = BindState.Absent;
+            return;
+        }
+
+        // Standard demotion based on reliability (easier thresholds)
+        if (Reliability > DemotionReliability) return;
 
         if (Bind == BindState.Inherited)
             Bind = BindState.Associated;
-        else if (Bind == BindState.Associated && Reliability < 0.3f)
+        else if (Bind == BindState.Associated && Reliability < 0.35f)
             Bind = BindState.Separate;
-        else if (Bind == BindState.Separate && Reliability < 0.2f)
+        else if (Bind == BindState.Separate && Reliability < 0.25f)
             Bind = BindState.Absent;
     }
 
@@ -218,5 +290,5 @@ public sealed class ReferenceNode
     public double AgeMs => (DateTime.UtcNow.Ticks - TicksCreated) / TimeSpan.TicksPerMillisecond;
 
     public override string ToString() =>
-        $"{Type}[{Id}] Bind={Bind} V={Validity:F2} R={Reliability:F2} Tags=[{string.Join(",", Tags)}]";
+        $"{Type}[{Id}] Bind={Bind} V={Validity:F2} R={Reliability:F2} S={Salience:F2} Tags=[{string.Join(",", Tags)}]";
 }

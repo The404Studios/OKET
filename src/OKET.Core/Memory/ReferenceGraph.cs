@@ -11,14 +11,22 @@ using OKET.Core.Operators;
 /// - Are time-windowed (older refs expire from working memory)
 /// - Can be queried by type, tag, time, bind state
 /// - Form chains: Detection → Track → Commitment → Action → Outcome
+/// - Decay in salience over time (low salience = prunable)
+/// - Are pruned by salience × strain, not just age
 ///
 /// The graph is the substrate for "operational understanding" -
 /// thinking can literally say: "I heard X, saw Y, they agreed, I committed, it worked."
+///
+/// CRITICAL: Salience decay prevents memory pollution.
+/// Low-salience, low-validity refs are pruned first.
 /// </summary>
 public sealed class ReferenceGraph
 {
     private readonly Dictionary<RefId, ReferenceNode> _nodes = new();
     private readonly object _lock = new();
+
+    // Current strain level (affects pruning aggressiveness)
+    private float _currentStrain;
 
     /// <summary>
     /// How long references stay in working memory (default 60 seconds).
@@ -199,11 +207,50 @@ public sealed class ReferenceGraph
     }
 
     /// <summary>
+    /// Update all references (salience decay, pruning).
+    /// Call every frame.
+    /// </summary>
+    /// <param name="currentStrain">Current system strain (Z₄). Higher = more aggressive pruning.</param>
+    public void UpdateAll(float currentStrain = 0f)
+    {
+        lock (_lock)
+        {
+            _currentStrain = currentStrain;
+
+            // Apply salience decay to all nodes
+            foreach (var node in _nodes.Values)
+            {
+                node.ApplySalienceDecay();
+            }
+
+            // Prune based on salience and strain
+            PruneIfNeeded();
+        }
+    }
+
+    /// <summary>
+    /// Get a reference by ID (refreshes its salience).
+    /// </summary>
+    public ReferenceNode? GetAndRefresh(RefId id)
+    {
+        lock (_lock)
+        {
+            if (_nodes.TryGetValue(id, out var node))
+            {
+                node.RefreshSalience();
+                return node;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Prune old references from working memory.
+    /// Uses salience-weighted pruning with strain consideration.
     /// </summary>
     private void PruneIfNeeded()
     {
-        // Prune by time
+        // Prune by time (respects Inherited)
         var cutoff = DateTime.UtcNow - WorkingMemoryWindow;
         var toRemove = _nodes.Values
             .Where(n => n.TimeCreated < cutoff && n.Bind != BindState.Inherited)
@@ -213,12 +260,34 @@ public sealed class ReferenceGraph
         foreach (var id in toRemove)
             _nodes.Remove(id);
 
-        // Prune by count if still too many
+        // Prune by salience (low salience = faded from attention)
+        // Under strain, prune more aggressively
+        float salienceThreshold = 0.1f + _currentStrain * 0.2f; // Higher strain = higher threshold
+        var lowSalience = _nodes.Values
+            .Where(n => n.Bind != BindState.Inherited && n.Salience < salienceThreshold)
+            .Select(n => n.Id)
+            .ToList();
+
+        foreach (var id in lowSalience)
+            _nodes.Remove(id);
+
+        // Prune Absent binds immediately
+        var absentBinds = _nodes.Values
+            .Where(n => n.Bind == BindState.Absent)
+            .Select(n => n.Id)
+            .ToList();
+
+        foreach (var id in absentBinds)
+            _nodes.Remove(id);
+
+        // Prune by count if still too many (salience × validity weighted)
         if (_nodes.Count > MaxNodes)
         {
+            // Sort by pruning priority: low salience + low validity = first to go
+            // Inherited refs are protected
             var excess = _nodes.Values
                 .Where(n => n.Bind != BindState.Inherited)
-                .OrderBy(n => n.Validity)
+                .OrderBy(n => n.Salience * 0.6f + n.Validity * 0.4f) // Combined score
                 .ThenBy(n => n.TimeCreated)
                 .Take(_nodes.Count - MaxNodes)
                 .Select(n => n.Id)
@@ -241,9 +310,15 @@ public sealed class ReferenceGraph
             var byBind = _nodes.Values.GroupBy(n => n.Bind)
                 .Select(g => $"{g.Key}:{g.Count()}");
 
-            return $"ReferenceGraph: {_nodes.Count} nodes\n" +
+            // Salience statistics
+            float avgSalience = _nodes.Values.Any() ? _nodes.Values.Average(n => n.Salience) : 0f;
+            int lowSalienceCount = _nodes.Values.Count(n => n.Salience < 0.3f);
+            int highValidityCount = _nodes.Values.Count(n => n.Validity > 0.7f);
+
+            return $"ReferenceGraph: {_nodes.Count} nodes (strain={_currentStrain:F2})\n" +
                    $"  ByType: {string.Join(", ", byType)}\n" +
-                   $"  ByBind: {string.Join(", ", byBind)}";
+                   $"  ByBind: {string.Join(", ", byBind)}\n" +
+                   $"  Salience: avg={avgSalience:F2}, low={lowSalienceCount}, highV={highValidityCount}";
         }
     }
 }

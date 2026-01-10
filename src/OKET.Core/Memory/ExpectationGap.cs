@@ -53,6 +53,9 @@ public enum GapType
 ///
 /// Gaps show up as elevated Z-scores, hesitation triggers, forced unlocks.
 /// They're not hypotheticals - they're missing expected signals.
+///
+/// CRITICAL: Gaps must DECAY, not just accumulate.
+/// Otherwise the system becomes paralyzed (learned helplessness).
 /// </summary>
 public sealed class ExpectationGap
 {
@@ -62,6 +65,11 @@ public sealed class ExpectationGap
     public float Severity { get; private set; }
     public int DurationFrames { get; private set; }
     public bool IsResolved { get; private set; }
+
+    /// <summary>
+    /// Whether this gap was explicitly accepted (closed knowingly).
+    /// </summary>
+    public bool WasAccepted { get; private set; }
 
     /// <summary>
     /// What was expected.
@@ -77,6 +85,12 @@ public sealed class ExpectationGap
     /// Reference that this gap applies to (if any).
     /// </summary>
     public RefId? RelatedRef { get; set; }
+
+    // Decay constants
+    private const float NaturalDecayRate = 0.02f;       // Per frame
+    private const float MaxSeverityGrowth = 0.01f;      // Per frame
+    private const float AcceptedDecayBonus = 0.05f;     // Faster decay when accepted
+    private const int MaxDurationBeforeAutoDecay = 90;  // ~3 seconds at 30fps
 
     public ExpectationGap(GapType type, string expected, string observed, float severity = 0.5f)
     {
@@ -96,8 +110,22 @@ public sealed class ExpectationGap
         if (stillPresent)
         {
             DurationFrames++;
-            // Severity increases the longer the gap persists
-            Severity = Math.Min(1f, Severity + 0.01f);
+
+            // Severity grows, but with diminishing returns and natural decay
+            if (DurationFrames < MaxDurationBeforeAutoDecay)
+            {
+                // Growth phase: severity increases but slower over time
+                float growthFactor = 1f - (DurationFrames / (float)MaxDurationBeforeAutoDecay);
+                Severity = Math.Min(1f, Severity + MaxSeverityGrowth * growthFactor);
+            }
+            else
+            {
+                // Decay phase: even unresolved gaps eventually decay
+                // (Reality: if something has been "wrong" for 3 seconds without catastrophe,
+                // maybe it's not as wrong as we thought)
+                float decayRate = WasAccepted ? NaturalDecayRate + AcceptedDecayBonus : NaturalDecayRate;
+                Severity = Math.Max(0.1f, Severity - decayRate);
+            }
         }
         else
         {
@@ -106,12 +134,45 @@ public sealed class ExpectationGap
     }
 
     /// <summary>
+    /// Apply natural decay (called every frame regardless of presence).
+    /// This prevents gap accumulation leading to paralysis.
+    /// </summary>
+    public void ApplyNaturalDecay(float outcomeTrend)
+    {
+        // If outcomes are improving, gaps decay faster
+        // (Reality: if things are getting better, maybe the gap doesn't matter)
+        float decayBonus = Math.Max(0, outcomeTrend) * 0.03f;
+        float decayRate = NaturalDecayRate + decayBonus;
+
+        if (WasAccepted)
+            decayRate += AcceptedDecayBonus;
+
+        Severity = Math.Max(0f, Severity - decayRate);
+
+        // Auto-resolve if severity drops to near zero
+        if (Severity < 0.05f)
+            IsResolved = true;
+    }
+
+    /// <summary>
+    /// Accept this gap - acknowledge it exists but proceed anyway.
+    /// This is NOT ignoring the gap; it's recording that we knowingly
+    /// moved forward with uncertainty.
+    /// </summary>
+    public void Accept()
+    {
+        WasAccepted = true;
+        // Immediate severity reduction (but not to zero)
+        Severity = Math.Max(0.2f, Severity * 0.6f);
+    }
+
+    /// <summary>
     /// Age in milliseconds.
     /// </summary>
     public double AgeMs => (DateTime.UtcNow - DetectedAt).TotalMilliseconds;
 
     public override string ToString() =>
-        $"Gap[{Type}] Sev={Severity:F2} Dur={DurationFrames} Resolved={IsResolved}";
+        $"Gap[{Type}] Sev={Severity:F2} Dur={DurationFrames} Accepted={WasAccepted} Resolved={IsResolved}";
 }
 
 /// <summary>
@@ -124,14 +185,26 @@ public sealed class ExpectationGap
 /// - Yield when confidence is high but gaps are severe
 /// - Demote inheritance when gaps persist
 /// - Never confuse "nothing wrong yet" with "confirmed safe"
+///
+/// CRITICAL DYNAMICS:
+/// - Gaps DECAY over time (prevents paralysis)
+/// - Gaps decay FASTER when outcomes improve (reality feedback)
+/// - Gaps can be ACCEPTED (proceed knowingly with uncertainty)
+/// - Old gaps auto-resolve (if it's been wrong for 3s without catastrophe, maybe it's ok)
 /// </summary>
 public sealed class ExpectationGapTracker
 {
     private readonly List<ExpectationGap> _activeGaps = new();
     private readonly List<ExpectationGap> _recentResolved = new();
+    private readonly List<ExpectationGap> _acceptedGaps = new(); // Explicitly closed
     private readonly object _lock = new();
 
     private const int MaxRecentResolved = 50;
+    private const int MaxAcceptedHistory = 20;
+
+    // Confidence recovery tracking
+    private float _consecutiveGoodOutcomes;
+    private float _outcomeTrendSmoothed;
 
     /// <summary>
     /// Total pressure from all active gaps [0, 1].
@@ -220,15 +293,31 @@ public sealed class ExpectationGapTracker
     }
 
     /// <summary>
-    /// Update all gaps and prune resolved ones.
+    /// Update all gaps with decay and prune resolved ones.
+    /// Call every frame.
     /// </summary>
-    public void UpdateAll()
+    /// <param name="outcomeTrend">Current outcome trend (positive = improving).</param>
+    public void UpdateAll(float outcomeTrend = 0f)
     {
         lock (_lock)
         {
+            // Update smoothed outcome trend
+            _outcomeTrendSmoothed = _outcomeTrendSmoothed * 0.9f + outcomeTrend * 0.1f;
+
+            // Track consecutive good outcomes for confidence recovery
+            if (outcomeTrend > 0.1f)
+                _consecutiveGoodOutcomes = Math.Min(30f, _consecutiveGoodOutcomes + 1f);
+            else if (outcomeTrend < -0.1f)
+                _consecutiveGoodOutcomes = 0f;
+            else
+                _consecutiveGoodOutcomes *= 0.95f;
+
             var toRemove = new List<ExpectationGap>();
             foreach (var gap in _activeGaps)
             {
+                // Apply natural decay (this is the key anti-paralysis mechanism)
+                gap.ApplyNaturalDecay(_outcomeTrendSmoothed);
+
                 if (gap.IsResolved)
                 {
                     toRemove.Add(gap);
@@ -242,6 +331,61 @@ public sealed class ExpectationGapTracker
             while (_recentResolved.Count > MaxRecentResolved)
                 _recentResolved.RemoveAt(0);
         }
+    }
+
+    /// <summary>
+    /// Accept a gap - acknowledge uncertainty but proceed anyway.
+    /// This is NOT ignoring the gap; it's recording that we knowingly
+    /// moved forward despite uncertainty. A form of epistemic honesty.
+    /// </summary>
+    public void AcceptGap(GapType type)
+    {
+        lock (_lock)
+        {
+            var gap = _activeGaps.FirstOrDefault(g => g.Type == type && !g.IsResolved);
+            if (gap != null)
+            {
+                gap.Accept();
+                _acceptedGaps.Add(gap);
+
+                while (_acceptedGaps.Count > MaxAcceptedHistory)
+                    _acceptedGaps.RemoveAt(0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Accept ALL current gaps - proceed with full knowledge of uncertainty.
+    /// Use sparingly. This is "I see the risks, I'm going anyway."
+    /// </summary>
+    public void AcceptAllGaps()
+    {
+        lock (_lock)
+        {
+            foreach (var gap in _activeGaps.Where(g => !g.IsResolved && !g.WasAccepted))
+            {
+                gap.Accept();
+                _acceptedGaps.Add(gap);
+            }
+
+            while (_acceptedGaps.Count > MaxAcceptedHistory)
+                _acceptedGaps.RemoveAt(0);
+        }
+    }
+
+    /// <summary>
+    /// Confidence recovery factor [0, 1].
+    /// High when outcomes have been good consistently.
+    /// This helps the system recover from gap paralysis.
+    /// </summary>
+    public float ConfidenceRecovery => Math.Min(1f, _consecutiveGoodOutcomes / 15f);
+
+    /// <summary>
+    /// Number of gaps that were explicitly accepted (epistemic honesty metric).
+    /// </summary>
+    public int AcceptedGapCount
+    {
+        get { lock (_lock) return _acceptedGaps.Count(g => !g.IsResolved); }
     }
 
     /// <summary>
@@ -322,10 +466,13 @@ public sealed class ExpectationGapTracker
         lock (_lock)
         {
             if (_activeGaps.Count == 0)
-                return "Gaps: none active";
+                return $"Gaps: none active, recovery={ConfidenceRecovery:F2}";
 
-            var gapList = string.Join(", ", _activeGaps.Select(g => $"{g.Type}({g.Severity:F2})"));
-            return $"Gaps: {_activeGaps.Count} active, pressure={TotalGapPressure:F2}\n  [{gapList}]";
+            var acceptedCount = _activeGaps.Count(g => g.WasAccepted);
+            var gapList = string.Join(", ", _activeGaps.Select(g =>
+                $"{g.Type}({g.Severity:F2}{(g.WasAccepted ? "*" : "")})"));
+            return $"Gaps: {_activeGaps.Count} active ({acceptedCount} accepted), " +
+                   $"pressure={TotalGapPressure:F2}, recovery={ConfidenceRecovery:F2}\n  [{gapList}]";
         }
     }
 }

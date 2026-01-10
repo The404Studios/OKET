@@ -42,6 +42,10 @@ public enum CueScope
 ///
 /// Cues that lie decay naturally.
 /// Cues that work harden into boundaries.
+///
+/// CRITICAL: Demotion is FASTER than promotion.
+/// Reality changes faster than truth stabilizes.
+/// This prevents boundary dogma.
 /// </summary>
 public sealed class Cue
 {
@@ -88,6 +92,12 @@ public sealed class Cue
     public int SuccessCount { get; private set; }
 
     /// <summary>
+    /// Consecutive failures (resets on success).
+    /// Used for rapid demotion.
+    /// </summary>
+    public int ConsecutiveFailures { get; private set; }
+
+    /// <summary>
     /// Whether this cue has hardened into a boundary.
     /// Boundaries are cues with high reliability, low cost, and global scope.
     /// </summary>
@@ -95,19 +105,24 @@ public sealed class Cue
         Reliability > 0.85f &&
         Cost < 0.3f &&
         Scope == CueScope.Global &&
-        TestCount > 30;
+        TestCount > 30 &&
+        ConsecutiveFailures == 0;
 
     /// <summary>
     /// Current binding state of this cue.
     /// </summary>
     public BindState BindState { get; private set; } = BindState.Separate;
 
-    // Configuration
-    private const float LearningRate = 0.1f;
+    // Configuration - ASYMMETRIC by design
+    // Promotion is slow and requires evidence
+    // Demotion is fast and triggered by failure
+    private const float SuccessLearningRate = 0.08f;     // Slow promotion
+    private const float FailureLearningRate = 0.15f;     // Fast demotion (1.9x faster)
     private const float DecayRate = 0.02f;
-    private const int MinTestsForPromotion = 10;
-    private const float PromotionThreshold = 0.75f;
-    private const float DemotionThreshold = 0.4f;
+    private const int MinTestsForPromotion = 15;          // More evidence needed
+    private const float PromotionThreshold = 0.78f;       // Higher bar
+    private const float DemotionThreshold = 0.5f;         // Easier to demote (was 0.4)
+    private const int ConsecutiveFailureDemotion = 3;     // 3 failures = immediate demotion
 
     public Cue(string id, string description, float cost = 0.1f)
     {
@@ -136,19 +151,21 @@ public sealed class Cue
         {
             // Success: cue predicted survival
             SuccessCount++;
-            Reliability = Reliability + LearningRate * (1f - Reliability);
+            ConsecutiveFailures = 0; // Reset failure streak
+            Reliability = Reliability + SuccessLearningRate * (1f - Reliability);
             ExpectedStrainDelta = ExpectedStrainDelta * 0.9f + strainDelta * 0.1f;
 
-            // Consider promotion
+            // Consider promotion (slow, requires evidence)
             TryPromote();
         }
         else
         {
             // Failure: cue did not predict survival
-            Reliability = Reliability - LearningRate * Reliability;
-            ExpectedStrainDelta = ExpectedStrainDelta * 0.9f; // Decay toward zero
+            ConsecutiveFailures++;
+            Reliability = Reliability - FailureLearningRate * Reliability;
+            ExpectedStrainDelta = ExpectedStrainDelta * 0.8f; // Faster decay on failure
 
-            // Consider demotion
+            // Consider demotion (fast, aggressive)
             TryDemote();
         }
     }
@@ -164,25 +181,30 @@ public sealed class Cue
 
     private void TryPromote()
     {
+        // Promotion requires substantial evidence
         if (TestCount < MinTestsForPromotion) return;
         if (Reliability < PromotionThreshold) return;
+        if (ConsecutiveFailures > 0) return; // No promotion with recent failures
 
-        // Promote scope
+        // Promote scope (requires more tests at each level)
         if (Scope == CueScope.Local && TestCount > MinTestsForPromotion)
         {
             Scope = CueScope.Regional;
         }
-        else if (Scope == CueScope.Regional && TestCount > MinTestsForPromotion * 2)
+        else if (Scope == CueScope.Regional && TestCount > MinTestsForPromotion * 3)
         {
             Scope = CueScope.Global;
         }
 
-        // Promote bind state
-        if (BindState == BindState.Separate && Reliability > 0.6f)
+        // Promote bind state (conservative)
+        if (BindState == BindState.Separate && Reliability > 0.65f && TestCount > MinTestsForPromotion)
         {
             BindState = BindState.Associated;
         }
-        else if (BindState == BindState.Associated && Reliability > 0.8f && Scope == CueScope.Global)
+        else if (BindState == BindState.Associated &&
+                 Reliability > 0.85f &&
+                 Scope == CueScope.Global &&
+                 TestCount > MinTestsForPromotion * 2)
         {
             BindState = BindState.Inherited;
         }
@@ -190,6 +212,22 @@ public sealed class Cue
 
     private void TryDemote()
     {
+        // FAST demotion - reality changes faster than truth stabilizes
+
+        // Consecutive failures trigger immediate demotion
+        if (ConsecutiveFailures >= ConsecutiveFailureDemotion)
+        {
+            // Harsh: drop one level in both scope and bind
+            if (Scope == CueScope.Global) Scope = CueScope.Regional;
+            else if (Scope == CueScope.Regional) Scope = CueScope.Local;
+
+            if (BindState == BindState.Inherited) BindState = BindState.Associated;
+            else if (BindState == BindState.Associated) BindState = BindState.Separate;
+
+            return;
+        }
+
+        // Standard demotion based on reliability
         if (Reliability > DemotionThreshold) return;
 
         // Demote scope
@@ -202,12 +240,12 @@ public sealed class Cue
             Scope = CueScope.Local;
         }
 
-        // Demote bind state
-        if (BindState == BindState.Inherited && Reliability < 0.5f)
+        // Demote bind state (more aggressive thresholds)
+        if (BindState == BindState.Inherited && Reliability < 0.6f)
         {
             BindState = BindState.Associated;
         }
-        else if (BindState == BindState.Associated && Reliability < 0.3f)
+        else if (BindState == BindState.Associated && Reliability < 0.4f)
         {
             BindState = BindState.Separate;
         }
