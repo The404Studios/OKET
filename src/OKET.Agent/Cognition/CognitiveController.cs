@@ -7,6 +7,7 @@ using OKET.Core.Interfaces;
 using OKET.Core.Operators;
 using OKET.Agent.Fusion;
 using OKET.Agent.Decision;
+using OKET.Agent.Memory;
 
 namespace OKET.Agent.Cognition;
 
@@ -49,6 +50,9 @@ public sealed class CognitiveController
     private readonly CueRegistry _cueRegistry = CueRegistry.CreateDefault();
     private readonly BindingValidator _bindingValidator = new();
 
+    // Reference memory (operational understanding)
+    private readonly ReferenceBuilder _refBuilder = new();
+
     private readonly IPolicy _policy;
     private readonly SkillExecutor _skillExecutor;
 
@@ -74,6 +78,8 @@ public sealed class CognitiveController
     public CueRegistry CueRegistry => _cueRegistry;
     public BindState CurrentBindState => _currentBindState;
     public GateContext CurrentGateContext => _currentGateContext;
+    public ReferenceBuilder RefMemory => _refBuilder;
+    public float ExpectationGapPressure => _refBuilder.Gaps.TotalGapPressure;
 
     public CognitiveController(IPolicy policy, SkillExecutor skillExecutor)
     {
@@ -95,6 +101,10 @@ public sealed class CognitiveController
         var zScoreInputs = _zScoreComputer.ComputeInputs(gameState, audioSnapshot, _lastPlan);
         _zScores.Update(zScoreInputs);
 
+        // === STAGE 1.5: REFERENCE MEMORY - PERCEPTION ===
+        // Build references from what "thinking heard and saw"
+        _refBuilder.AfterPerception(gameState, audioSnapshot, _zScores);
+
         // === STAGE 2: MULTIMODAL FUSION ===
         // Uses Z₀, Z₁ implicitly through the fusion algorithm
         _rawBelief = _fusion.Fuse(gameState, audioSnapshot);
@@ -109,6 +119,10 @@ public sealed class CognitiveController
             _zScores.Z1_PerceptualAgreement, // Z₁ as input
             _zScores.Z2_BeliefStability,     // Z₂ as input
             _zScores.Z3_ControlEfficacy);    // Z₃ as input
+
+        // === STAGE 3.25: REFERENCE MEMORY - FUSION ===
+        // Build belief candidate references
+        _refBuilder.AfterFusion(_rawBelief, _currentFeeling, _zScores);
 
         // === STAGE 3.5: CUE EVALUATION ===
         // Evaluate cues to get strain discount
@@ -131,12 +145,16 @@ public sealed class CognitiveController
 
         // === STAGE 5.5: BUILD GATE CONTEXT + VALIDATE ===
         // Build context for gate validation
-        bool isInhibited = _currentFeeling.ValidityCompromised && _currentFeeling.ShouldHesitate;
+        // Include expectation gap pressure in inhibition check
+        // (what we haven't thought about can inhibit emission)
+        float gapPressure = _refBuilder.Gaps.TotalGapPressure;
+        bool isInhibited = (_currentFeeling.ValidityCompromised && _currentFeeling.ShouldHesitate)
+                        || (gapPressure > 0.6f && !_currentFeeling.MustActNow);
         _currentGateContext = BindingValidator.BuildContext(
             _currentBindState,
-            _currentFeeling.Validity,
+            _currentFeeling.Validity - gapPressure * 0.2f, // Gaps reduce effective validity
             _currentFeeling.PerceptionTrust,
-            _zScores.SystemStrain - cueStrainDiscount, // Apply cue discount
+            _zScores.SystemStrain - cueStrainDiscount + gapPressure * 0.3f, // Gaps add to strain
             isInhibited,
             _currentFeeling.OutcomeTrend,
             _currentFeeling.MustActNow);
@@ -159,6 +177,27 @@ public sealed class CognitiveController
         bool survived = !_committedState.ForcedUnlock && _currentFeeling.Validity > 0.35f;
         _cueRegistry.RecordOutcome(survived, strainDelta, outcomeDelta);
         _lastOutcomeTrend = outcomeDelta;
+
+        // === STAGE 6.75: REFERENCE MEMORY - OUTCOME ===
+        // Record outcome for reference memory (what happened after acting)
+        _refBuilder.AfterOutcome(
+            strainDelta,
+            outcomeDelta,
+            gameState.Aim.HitConfirmed,
+            survived);
+
+        // === STAGE 6.9: META-COGNITIVE CLOSURE ===
+        // Check what we're thinking against what we haven't thought
+        // This is where "absence is information" becomes computable
+        _refBuilder.CheckExpectations(
+            hasAudioConfirmation: audioSnapshot.HasCombatSounds || audioSnapshot.HasDamageSounds,
+            hasVisualConfirmation: gameState.Aim.HitConfirmed,
+            modalityAgreement: _zScores.Z1_PerceptualAgreement,
+            actionHadFeedback: _lastPlan?.Actions.Count > 0,
+            strainTrend: strainDelta,
+            confidenceLevel: _rawBelief.Confidence,
+            hasTarget: gameState.Detections.PrimaryThreat != null,
+            controlHadEffect: _zScores.Z3_ControlEfficacy > 0);
 
         // === STAGE 7: GATE-VALIDATED OVERRIDES ===
         // Validate actions through operator algebra
@@ -190,6 +229,10 @@ public sealed class CognitiveController
 
         // === STAGE 8: SKILL EXECUTION ===
         var plan = _skillExecutor.Execute(gameState, committedMode);
+
+        // === STAGE 8.5: REFERENCE MEMORY - COMMITMENT ===
+        // Record commitment and action plan in reference memory
+        _refBuilder.AfterCommitment(_committedState, plan, _currentFeeling);
 
         // === STAGE 9: ACTION MODULATION ===
         plan = ModulateActionPlan(plan, _currentFeeling);
@@ -325,6 +368,7 @@ public sealed class CognitiveController
         var feelingInfo = _currentFeeling?.GetSummary() ?? "Feeling: none";
         var zInfo = _zScores.GetDiagnostics();
         var cueInfo = _cueRegistry.GetSummary();
+        var refInfo = _refBuilder.GetDiagnostics();
 
         return $"""
             === COGNITIVE STATE ===
@@ -332,9 +376,11 @@ public sealed class CognitiveController
             {lockInfo}
             BindState: {_currentBindState}
             GateContext: {_currentGateContext}
+            GapPressure: {ExpectationGapPressure:F2}
             {feelingInfo}
             {zInfo}
             {cueInfo}
+            {refInfo}
             =======================
             """;
     }
