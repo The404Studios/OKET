@@ -54,8 +54,10 @@ public enum GapType
 /// Gaps show up as elevated Z-scores, hesitation triggers, forced unlocks.
 /// They're not hypotheticals - they're missing expected signals.
 ///
-/// CRITICAL: Gaps must DECAY, not just accumulate.
-/// Otherwise the system becomes paralyzed (learned helplessness).
+/// CRITICAL LAW: Gaps must NEVER decay silently.
+/// They resolve by being FILLED (signal arrives) or ABANDONED (explicit acceptance).
+/// Decay reduces URGENCY, not EXISTENCE.
+/// Forgetting absence is not allowed.
 /// </summary>
 public sealed class ExpectationGap
 {
@@ -68,8 +70,14 @@ public sealed class ExpectationGap
 
     /// <summary>
     /// Whether this gap was explicitly accepted (closed knowingly).
+    /// Only accepted gaps can fully resolve through decay.
     /// </summary>
     public bool WasAccepted { get; private set; }
+
+    /// <summary>
+    /// Whether this gap was filled (the expected signal arrived).
+    /// </summary>
+    public bool WasFilled { get; private set; }
 
     /// <summary>
     /// What was expected.
@@ -90,14 +98,15 @@ public sealed class ExpectationGap
     private const float NaturalDecayRate = 0.02f;       // Per frame
     private const float MaxSeverityGrowth = 0.01f;      // Per frame
     private const float AcceptedDecayBonus = 0.05f;     // Faster decay when accepted
-    private const int MaxDurationBeforeAutoDecay = 90;  // ~3 seconds at 30fps
+    private const float SeverityFloor = 0.15f;          // Gaps can't decay below this unless resolved
+    private const int MaxDurationBeforeDecay = 90;      // ~3 seconds at 30fps
 
     public ExpectationGap(GapType type, string expected, string observed, float severity = 0.5f)
     {
         Type = type;
         Expected = expected;
         Observed = observed;
-        Severity = Math.Clamp(severity, 0f, 1f);
+        Severity = Math.Clamp(severity, SeverityFloor, 1f);
         DetectedAt = DateTime.UtcNow;
         Description = $"{type}: expected '{expected}', got '{observed}'";
     }
@@ -111,59 +120,66 @@ public sealed class ExpectationGap
         {
             DurationFrames++;
 
-            // Severity grows, but with diminishing returns and natural decay
-            if (DurationFrames < MaxDurationBeforeAutoDecay)
+            // Severity grows with diminishing returns
+            if (DurationFrames < MaxDurationBeforeDecay)
             {
-                // Growth phase: severity increases but slower over time
-                float growthFactor = 1f - (DurationFrames / (float)MaxDurationBeforeAutoDecay);
+                float growthFactor = 1f - (DurationFrames / (float)MaxDurationBeforeDecay);
                 Severity = Math.Min(1f, Severity + MaxSeverityGrowth * growthFactor);
             }
             else
             {
-                // Decay phase: even unresolved gaps eventually decay
-                // (Reality: if something has been "wrong" for 3 seconds without catastrophe,
-                // maybe it's not as wrong as we thought)
+                // Decay phase: reduce urgency but NOT below floor
+                // Gap PERSISTS - just becomes less urgent
                 float decayRate = WasAccepted ? NaturalDecayRate + AcceptedDecayBonus : NaturalDecayRate;
-                Severity = Math.Max(0.1f, Severity - decayRate);
+                Severity = Math.Max(SeverityFloor, Severity - decayRate);
             }
         }
         else
         {
+            // Signal arrived - gap is FILLED
+            WasFilled = true;
             IsResolved = true;
         }
     }
 
     /// <summary>
     /// Apply natural decay (called every frame regardless of presence).
-    /// This prevents gap accumulation leading to paralysis.
+    /// Decay reduces URGENCY, not EXISTENCE.
+    /// Gap only resolves if: filled (signal arrived) OR accepted AND decayed.
     /// </summary>
     public void ApplyNaturalDecay(float outcomeTrend)
     {
-        // If outcomes are improving, gaps decay faster
-        // (Reality: if things are getting better, maybe the gap doesn't matter)
+        // If outcomes are improving, decay faster
         float decayBonus = Math.Max(0, outcomeTrend) * 0.03f;
         float decayRate = NaturalDecayRate + decayBonus;
 
         if (WasAccepted)
             decayRate += AcceptedDecayBonus;
 
-        Severity = Math.Max(0f, Severity - decayRate);
+        // CRITICAL: Decay to floor, not to zero (unless closure conditions met)
+        float floor = (WasAccepted || WasFilled) ? 0f : SeverityFloor;
+        Severity = Math.Max(floor, Severity - decayRate);
 
-        // Auto-resolve if severity drops to near zero
-        if (Severity < 0.05f)
+        // Resolution requires explicit closure:
+        // - Signal arrived (WasFilled), OR
+        // - Explicitly accepted AND severity dropped (acknowledged abandonment)
+        if (WasFilled || (WasAccepted && Severity < 0.05f))
+        {
             IsResolved = true;
+        }
+        // Gaps that were never acknowledged CANNOT silently resolve
     }
 
     /// <summary>
     /// Accept this gap - acknowledge it exists but proceed anyway.
     /// This is NOT ignoring the gap; it's recording that we knowingly
-    /// moved forward with uncertainty.
+    /// moved forward with uncertainty. ONLY accepted gaps can fully decay.
     /// </summary>
     public void Accept()
     {
         WasAccepted = true;
-        // Immediate severity reduction (but not to zero)
-        Severity = Math.Max(0.2f, Severity * 0.6f);
+        // Immediate severity reduction (but not below floor yet)
+        Severity = Math.Max(SeverityFloor, Severity * 0.6f);
     }
 
     /// <summary>
@@ -172,7 +188,7 @@ public sealed class ExpectationGap
     public double AgeMs => (DateTime.UtcNow - DetectedAt).TotalMilliseconds;
 
     public override string ToString() =>
-        $"Gap[{Type}] Sev={Severity:F2} Dur={DurationFrames} Accepted={WasAccepted} Resolved={IsResolved}";
+        $"Gap[{Type}] Sev={Severity:F2} Dur={DurationFrames} Accepted={WasAccepted} Filled={WasFilled} Resolved={IsResolved}";
 }
 
 /// <summary>
@@ -186,11 +202,17 @@ public sealed class ExpectationGap
 /// - Demote inheritance when gaps persist
 /// - Never confuse "nothing wrong yet" with "confirmed safe"
 ///
-/// CRITICAL DYNAMICS:
-/// - Gaps DECAY over time (prevents paralysis)
-/// - Gaps decay FASTER when outcomes improve (reality feedback)
-/// - Gaps can be ACCEPTED (proceed knowingly with uncertainty)
-/// - Old gaps auto-resolve (if it's been wrong for 3s without catastrophe, maybe it's ok)
+/// CRITICAL LAWS:
+/// 1. Gaps NEVER resolve silently - only by being FILLED or explicitly ACCEPTED
+/// 2. Decay reduces URGENCY (severity), not EXISTENCE
+/// 3. Unacknowledged gaps persist at a floor - they don't disappear
+/// 4. Forgetting absence is forbidden
+///
+/// DYNAMICS:
+/// - Gaps decay in severity (become less urgent over time)
+/// - Severity has a floor (~0.15) for unresolved gaps
+/// - Only FILLED (signal arrived) or ACCEPTED (acknowledged) gaps can fully resolve
+/// - This prevents "silent forgetting" while avoiding paralysis
 /// </summary>
 public sealed class ExpectationGapTracker
 {
