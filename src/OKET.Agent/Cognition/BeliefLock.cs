@@ -8,6 +8,9 @@ namespace OKET.Agent.Cognition;
 /// Hysteresis gate that prevents belief/mode thrashing.
 /// Implements: "I will not switch unless the new state wins by a margin for a minimum duration."
 ///
+/// CRITICAL: Also implements forced unlock when strain rises while outcomes worsen.
+/// Without this, hysteresis can trap the agent in wrong beliefs.
+///
 /// This is the difference between "looks like a bot" and "looks deliberate."
 /// </summary>
 public sealed class BeliefLock
@@ -25,12 +28,23 @@ public sealed class BeliefLock
     private DateTime _candidateStartTime;
     private int _candidateFrames;
 
-    // Configurable thresholds (these become Feeling control knobs)
-    public float ThreatMargin { get; set; } = 0.15f;      // New threat must exceed current by this margin
-    public float ConfidenceMargin { get; set; } = 0.1f;   // New belief must be this much more confident
-    public int MinCommitFrames { get; set; } = 10;        // ~330ms at 30fps
-    public int MinLockDuration { get; set; } = 15;        // Can't switch for this many frames after committing
-    public float UrgencyOverride { get; set; } = 0.8f;    // Skip hysteresis if urgency exceeds this
+    // Strain/outcome tracking for forced unlock
+    private readonly Queue<float> _strainHistory = new();
+    private readonly Queue<float> _outcomeHistory = new();
+    private const int HistorySize = 30; // ~1 second at 30fps
+    private int _framesSinceLastUnlock;
+
+    // Configurable thresholds
+    public float ThreatMargin { get; set; } = 0.15f;
+    public float ConfidenceMargin { get; set; } = 0.1f;
+    public int MinCommitFrames { get; set; } = 10;
+    public int MinLockDuration { get; set; } = 15;
+    public float UrgencyOverride { get; set; } = 0.8f;
+
+    // Forced unlock thresholds
+    public float StrainRiseThreshold { get; set; } = 0.3f;    // Strain must rise by this much
+    public float OutcomeDeclineThreshold { get; set; } = 0.2f; // Outcomes must decline by this much
+    public int MinFramesBetweenUnlocks { get; set; } = 45;     // ~1.5s cooldown between forced unlocks
 
     /// <summary>Current committed belief.</summary>
     public BeliefState? CommittedBelief => _committedBelief;
@@ -47,6 +61,15 @@ public sealed class BeliefLock
     /// <summary>Whether currently locked (can't switch).</summary>
     public bool IsLocked => FramesSinceCommit < MinLockDuration;
 
+    /// <summary>Whether forced unlock was triggered this frame.</summary>
+    public bool ForcedUnlockTriggered { get; private set; }
+
+    /// <summary>Current strain trend (for diagnostics).</summary>
+    public float StrainTrend { get; private set; }
+
+    /// <summary>Current outcome trend (for diagnostics).</summary>
+    public float OutcomeTrend { get; private set; }
+
     /// <summary>
     /// Process a new belief/mode proposal. Returns the committed state to use.
     /// </summary>
@@ -57,54 +80,74 @@ public sealed class BeliefLock
         InteroceptiveState feeling)
     {
         FramesSinceCommit++;
+        _framesSinceLastUnlock++;
+        ForcedUnlockTriggered = false;
+
+        // Track strain and outcome history
+        UpdateHistory(feeling.SystemStrain, feeling.OutcomeTrend);
 
         // Apply feeling modulation to thresholds
         float effectiveMargin = ThreatMargin * feeling.CommitmentConfidence;
         int effectiveMinFrames = (int)(MinCommitFrames / Math.Max(feeling.ActionSpeedModifier, 0.5f));
 
-        // Check for urgency override (high urgency = skip hysteresis)
+        // Check for urgency override
         bool urgentOverride = feeling.Urgency > UrgencyOverride;
+
+        // CHECK FOR FORCED UNLOCK: strain rising + outcomes worsening
+        bool forcedUnlock = CheckForcedUnlock();
+        if (forcedUnlock)
+        {
+            ForcedUnlockTriggered = true;
+            _framesSinceLastUnlock = 0;
+            // Don't commit yet - just unlock and let normal evaluation proceed
+        }
 
         // First commitment (cold start)
         if (_committedBelief == null)
         {
-            Commit(proposedBelief, proposedMode, proposedTargetId);
+            Commit(proposedBelief, proposedMode, proposedTargetId, "cold_start");
             return GetCommittedState();
         }
 
-        // Check if locked
-        if (IsLocked && !urgentOverride)
+        // Check if locked (unless forced unlock or urgent)
+        if (IsLocked && !urgentOverride && !forcedUnlock)
         {
-            // Still locked - ignore proposal, return committed
             return GetCommittedState();
         }
 
         // Evaluate the proposal
         var evaluation = EvaluateProposal(proposedBelief, proposedMode, proposedTargetId, effectiveMargin);
 
+        // Forced unlock lowers the bar for acceptance
+        if (forcedUnlock && evaluation == ProposalResult.Reject)
+        {
+            // Under forced unlock, even marginal improvements are accepted as candidates
+            evaluation = ProposalResult.Candidate;
+        }
+
         if (evaluation == ProposalResult.Accept)
         {
-            // Clear win - commit immediately
-            Commit(proposedBelief, proposedMode, proposedTargetId);
+            Commit(proposedBelief, proposedMode, proposedTargetId, "clear_win");
             return GetCommittedState();
         }
         else if (evaluation == ProposalResult.Candidate)
         {
-            // Potential switch - track as candidate
             if (IsSameCandidate(proposedBelief, proposedMode, proposedTargetId))
             {
                 _candidateFrames++;
 
-                // Candidate has been consistent long enough?
-                if (_candidateFrames >= effectiveMinFrames)
+                // Under forced unlock, commit faster
+                int framesToCommit = forcedUnlock ? effectiveMinFrames / 2 : effectiveMinFrames;
+
+                if (_candidateFrames >= framesToCommit)
                 {
-                    Commit(proposedBelief, proposedMode, proposedTargetId);
+                    Commit(proposedBelief, proposedMode, proposedTargetId,
+                        forcedUnlock ? "forced_unlock" : "candidate_won");
                     return GetCommittedState();
                 }
             }
             else
             {
-                // New candidate - reset counter
                 _candidateBelief = proposedBelief;
                 _candidateMode = proposedMode;
                 _candidateTargetId = proposedTargetId;
@@ -114,13 +157,60 @@ public sealed class BeliefLock
         }
         else
         {
-            // Proposal rejected - clear any candidate
             _candidateBelief = null;
             _candidateFrames = 0;
         }
 
-        // Return committed state
         return GetCommittedState();
+    }
+
+    private void UpdateHistory(float strain, float outcome)
+    {
+        _strainHistory.Enqueue(strain);
+        _outcomeHistory.Enqueue(outcome);
+
+        while (_strainHistory.Count > HistorySize)
+            _strainHistory.Dequeue();
+        while (_outcomeHistory.Count > HistorySize)
+            _outcomeHistory.Dequeue();
+
+        // Calculate trends
+        if (_strainHistory.Count >= 10)
+        {
+            var strainList = _strainHistory.ToList();
+            var outcomeList = _outcomeHistory.ToList();
+
+            int mid = strainList.Count / 2;
+
+            float recentStrain = strainList.Skip(mid).Average();
+            float olderStrain = strainList.Take(mid).Average();
+            StrainTrend = recentStrain - olderStrain;
+
+            float recentOutcome = outcomeList.Skip(mid).Average();
+            float olderOutcome = outcomeList.Take(mid).Average();
+            OutcomeTrend = recentOutcome - olderOutcome;
+        }
+    }
+
+    /// <summary>
+    /// Check if we should force unlock due to rising strain + declining outcomes.
+    /// This prevents the agent from being trapped in wrong beliefs.
+    /// </summary>
+    private bool CheckForcedUnlock()
+    {
+        // Cooldown between forced unlocks
+        if (_framesSinceLastUnlock < MinFramesBetweenUnlocks)
+            return false;
+
+        // Need enough history
+        if (_strainHistory.Count < 10)
+            return false;
+
+        // Check: strain rising AND outcomes declining
+        bool strainRising = StrainTrend > StrainRiseThreshold;
+        bool outcomesWorsening = OutcomeTrend < -OutcomeDeclineThreshold;
+
+        return strainRising && outcomesWorsening;
     }
 
     private ProposalResult EvaluateProposal(
@@ -129,41 +219,31 @@ public sealed class BeliefLock
         int? proposedTargetId,
         float margin)
     {
-        // Mode change evaluation
         bool modeChanged = proposedMode != _committedMode;
-
-        // Target change evaluation
         bool targetChanged = proposedTargetId != _committedTargetId && proposedTargetId != null;
 
-        // Threat level change evaluation
         float threatDelta = proposed.ThreatLevel - (_committedBelief?.ThreatLevel ?? 0);
-
-        // Confidence evaluation
         float confidenceDelta = proposed.Confidence - (_committedBelief?.Confidence ?? 0);
 
         // Special cases: always accept certain transitions
         if (_committedMode == StrategicMode.Idle && proposedMode != StrategicMode.Idle)
         {
-            // Leaving idle - accept any action
             return ProposalResult.Accept;
         }
 
         if (proposed.ThreatLevel > 0.7f && _committedBelief?.ThreatLevel < 0.3f)
         {
-            // Major threat escalation - accept immediately
             return ProposalResult.Accept;
         }
 
         if (proposed.HealthRisk > 0.8f && proposedMode == StrategicMode.Kite)
         {
-            // Critical health + kite mode - accept immediately
             return ProposalResult.Accept;
         }
 
-        // Standard evaluation: does proposal win by margin?
+        // Standard evaluation
         if (modeChanged || targetChanged)
         {
-            // Need to win by margin
             bool betterThreatAssessment = threatDelta > margin || Math.Abs(threatDelta) < 0.1f;
             bool betterConfidence = confidenceDelta > -ConfidenceMargin;
 
@@ -178,7 +258,6 @@ public sealed class BeliefLock
         }
         else
         {
-            // Same mode and target - just update belief
             return ProposalResult.Accept;
         }
     }
@@ -192,18 +271,21 @@ public sealed class BeliefLock
                Math.Abs(belief.ThreatLevel - _candidateBelief.ThreatLevel) < 0.2f;
     }
 
-    private void Commit(BeliefState belief, StrategicMode mode, int? targetId)
+    private void Commit(BeliefState belief, StrategicMode mode, int? targetId, string reason)
     {
         _committedBelief = belief;
         _committedMode = mode;
         _committedTargetId = targetId;
         _commitTime = DateTime.UtcNow;
         FramesSinceCommit = 0;
+        LastCommitReason = reason;
 
-        // Clear candidate
         _candidateBelief = null;
         _candidateFrames = 0;
     }
+
+    /// <summary>Reason for last commit (for diagnostics).</summary>
+    public string LastCommitReason { get; private set; } = "";
 
     private CommittedState GetCommittedState()
     {
@@ -215,7 +297,11 @@ public sealed class BeliefLock
             FramesSinceCommit = FramesSinceCommit,
             IsLocked = IsLocked,
             HasCandidate = _candidateBelief != null,
-            CandidateFrames = _candidateFrames
+            CandidateFrames = _candidateFrames,
+            ForcedUnlock = ForcedUnlockTriggered,
+            StrainTrend = StrainTrend,
+            OutcomeTrend = OutcomeTrend,
+            CommitReason = LastCommitReason
         };
     }
 
@@ -226,6 +312,7 @@ public sealed class BeliefLock
     {
         _committedMode = mode;
         FramesSinceCommit = 0;
+        LastCommitReason = "safety_override";
     }
 
     /// <summary>
@@ -239,13 +326,17 @@ public sealed class BeliefLock
         _candidateBelief = null;
         _candidateFrames = 0;
         FramesSinceCommit = 0;
+        _strainHistory.Clear();
+        _outcomeHistory.Clear();
+        _framesSinceLastUnlock = 0;
+        LastCommitReason = "";
     }
 
     private enum ProposalResult
     {
-        Accept,     // Commit immediately
-        Candidate,  // Track as candidate, commit after duration
-        Reject      // Ignore, keep current
+        Accept,
+        Candidate,
+        Reject
     }
 }
 
@@ -261,4 +352,8 @@ public sealed record CommittedState
     public bool IsLocked { get; init; }
     public bool HasCandidate { get; init; }
     public int CandidateFrames { get; init; }
+    public bool ForcedUnlock { get; init; }
+    public float StrainTrend { get; init; }
+    public float OutcomeTrend { get; init; }
+    public string CommitReason { get; init; } = "";
 }
