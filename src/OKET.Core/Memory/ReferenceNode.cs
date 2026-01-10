@@ -72,9 +72,10 @@ public enum RefType
 /// References are born local (Separate), earn validity through the sink,
 /// and only then get promoted to global structure (Inherited).
 ///
-/// CRITICAL: Demotion is FASTER than promotion.
-/// Reality changes faster than truth stabilizes.
-/// This prevents reference dogma.
+/// CRITICAL LAWS:
+/// 1. Demotion is FASTER than promotion (reality changes faster than truth stabilizes)
+/// 2. Promotion requires DIVERSE survival (not just repetition in same conditions)
+/// 3. Inherited is REVOCABLE (sustained gap pressure can demote)
 ///
 /// This is "thinking's memory" - ears + eyes → coherent references.
 /// </summary>
@@ -152,6 +153,25 @@ public sealed class ReferenceNode
             ? ValidationCount / (float)(ValidationCount + FailureCount)
             : 0.5f;
 
+    /// <summary>
+    /// Context diversity: variance of conditions under which this ref was validated.
+    /// High = survived across different Z regimes (robust).
+    /// Low = only validated in narrow conditions (brittle).
+    /// Promotion requires diversity - repetition alone is insufficient.
+    /// </summary>
+    public float ContextDiversity { get; private set; }
+
+    /// <summary>
+    /// Accumulated gap pressure against this reference.
+    /// Sustained gap pressure can demote even Inherited refs.
+    /// Inheritance is revocable trust, not permanent truth.
+    /// </summary>
+    public float AccumulatedGapPressure { get; private set; }
+
+    // Track validation contexts for diversity calculation
+    private readonly List<(float z0, float z1, float z4)> _validationContexts = new();
+    private const int MaxContextHistory = 20;
+
     // ASYMMETRIC by design - demotion is faster than promotion
     private const float SuccessValidityRate = 0.15f;      // Slow promotion
     private const float FailureValidityRate = 0.28f;      // Fast demotion (1.9x faster)
@@ -162,6 +182,8 @@ public sealed class ReferenceNode
     private const float PromotionReliability = 0.75f;     // Higher bar for promotion
     private const float DemotionReliability = 0.45f;      // Easier to demote
     private const int ConsecutiveFailureDemotion = 2;     // 2 failures = immediate demotion
+    private const float MinDiversityForPromotion = 0.25f; // Must survive varied conditions
+    private const float GapPressureDemotionThreshold = 0.6f; // Sustained gap pressure triggers demotion
 
     public ReferenceNode(RefType type, BindState initialBind = BindState.Separate)
     {
@@ -175,9 +197,10 @@ public sealed class ReferenceNode
     }
 
     /// <summary>
-    /// Record a validation result (did this reference carry load?).
+    /// Record a validation result with context (did this reference carry load?).
+    /// Context is used to track diversity of survival conditions.
     /// </summary>
-    public void RecordValidation(bool survived, float validityDelta)
+    public void RecordValidation(bool survived, float validityDelta, float z0 = 0f, float z1 = 0f, float z4 = 0f)
     {
         if (survived)
         {
@@ -185,6 +208,18 @@ public sealed class ReferenceNode
             ConsecutiveFailures = 0; // Reset failure streak
             Validity = Math.Clamp(Validity + validityDelta * SuccessValidityRate, 0f, 1f);
             Salience = Math.Min(1f, Salience + SalienceBoostOnSuccess);
+
+            // Track validation context for diversity calculation
+            _validationContexts.Add((z0, z1, z4));
+            if (_validationContexts.Count > MaxContextHistory)
+                _validationContexts.RemoveAt(0);
+
+            // Update context diversity (variance of Z values across validations)
+            UpdateContextDiversity();
+
+            // Gap pressure decays on successful validation
+            AccumulatedGapPressure = Math.Max(0f, AccumulatedGapPressure - 0.1f);
+
             TryPromote();
         }
         else
@@ -196,6 +231,57 @@ public sealed class ReferenceNode
             Salience = Math.Max(0.1f, Salience - SaliencePenaltyOnFailure);
             TryDemote();
         }
+    }
+
+    /// <summary>
+    /// Apply gap pressure against this reference.
+    /// Sustained gap pressure can demote even Inherited refs.
+    /// </summary>
+    public void ApplyGapPressure(float pressure)
+    {
+        AccumulatedGapPressure = Math.Min(1f, AccumulatedGapPressure + pressure * 0.1f);
+
+        // Sustained gap pressure triggers demotion (even for Inherited)
+        if (AccumulatedGapPressure > GapPressureDemotionThreshold)
+        {
+            // Inheritance is revocable trust
+            if (Bind == BindState.Inherited) Bind = BindState.Associated;
+            else if (Bind == BindState.Associated) Bind = BindState.Separate;
+
+            // Reset pressure after demotion
+            AccumulatedGapPressure *= 0.5f;
+        }
+    }
+
+    /// <summary>
+    /// Update context diversity based on validation history.
+    /// </summary>
+    private void UpdateContextDiversity()
+    {
+        if (_validationContexts.Count < 3)
+        {
+            ContextDiversity = 0f;
+            return;
+        }
+
+        // Calculate variance for each Z dimension
+        float varZ0 = CalculateVariance(_validationContexts.Select(c => c.z0));
+        float varZ1 = CalculateVariance(_validationContexts.Select(c => c.z1));
+        float varZ4 = CalculateVariance(_validationContexts.Select(c => c.z4));
+
+        // Combined diversity (normalized)
+        // Higher variance = more diverse conditions = more robust survival
+        ContextDiversity = Math.Min(1f, (varZ0 + varZ1 + varZ4) / 3f);
+    }
+
+    private static float CalculateVariance(IEnumerable<float> values)
+    {
+        var list = values.ToList();
+        if (list.Count < 2) return 0f;
+
+        float mean = list.Average();
+        float sumSquares = list.Sum(v => (v - mean) * (v - mean));
+        return sumSquares / list.Count;
     }
 
     /// <summary>
@@ -217,7 +303,8 @@ public sealed class ReferenceNode
 
     /// <summary>
     /// Try to promote this reference to higher bind state.
-    /// Promotion is SLOW - requires substantial evidence.
+    /// Promotion is SLOW - requires substantial evidence AND diverse survival.
+    /// Repetition in same conditions is insufficient.
     /// </summary>
     private void TryPromote()
     {
@@ -226,13 +313,22 @@ public sealed class ReferenceNode
         if (Reliability < PromotionReliability) return;
         if (ConsecutiveFailures > 0) return; // No promotion with recent failures
 
+        // CRITICAL: Promotion requires diverse survival conditions
+        // Surviving 10 times in identical conditions is NOT promotion-worthy
+        // Must survive across different Z regimes to prove robustness
+        if (ContextDiversity < MinDiversityForPromotion) return;
+
+        // Gap pressure blocks promotion (unresolved uncertainty)
+        if (AccumulatedGapPressure > 0.3f) return;
+
         if (Bind == BindState.Separate && Reliability > 0.65f)
         {
             Bind = BindState.Associated;
         }
         else if (Bind == BindState.Associated &&
                  Reliability > 0.85f &&
-                 ValidationCount > MinValidationsForPromotion * 2)
+                 ValidationCount > MinValidationsForPromotion * 2 &&
+                 ContextDiversity > MinDiversityForPromotion * 1.5f) // Higher diversity bar for Inherited
         {
             Bind = BindState.Inherited;
         }
@@ -290,5 +386,5 @@ public sealed class ReferenceNode
     public double AgeMs => (DateTime.UtcNow.Ticks - TicksCreated) / TimeSpan.TicksPerMillisecond;
 
     public override string ToString() =>
-        $"{Type}[{Id}] Bind={Bind} V={Validity:F2} R={Reliability:F2} S={Salience:F2} Tags=[{string.Join(",", Tags)}]";
+        $"{Type}[{Id}] Bind={Bind} V={Validity:F2} R={Reliability:F2} S={Salience:F2} D={ContextDiversity:F2} G={AccumulatedGapPressure:F2}";
 }

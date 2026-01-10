@@ -5,6 +5,7 @@ using OKET.Core.Actions;
 using OKET.Core.Cognition;
 using OKET.Core.Interfaces;
 using OKET.Core.Operators;
+using OKET.Core.Integration;
 using OKET.Agent.Fusion;
 using OKET.Agent.Decision;
 using OKET.Agent.Memory;
@@ -53,6 +54,10 @@ public sealed class CognitiveController
     // Reference memory (operational understanding)
     private readonly ReferenceBuilder _refBuilder = new();
 
+    // Frame Integrator (CENTER - neutral opposite of left/right)
+    private readonly FrameIntegrator _frameIntegrator = new();
+    private readonly IntegrationBridge _integrationBridge;
+
     private readonly IPolicy _policy;
     private readonly SkillExecutor _skillExecutor;
 
@@ -80,11 +85,15 @@ public sealed class CognitiveController
     public GateContext CurrentGateContext => _currentGateContext;
     public ReferenceBuilder RefMemory => _refBuilder;
     public float ExpectationGapPressure => _refBuilder.Gaps.TotalGapPressure;
+    public FrameIntegrator FrameIntegrator => _frameIntegrator;
+    public float CenterCoherence => _frameIntegrator.Coherence;
+    public float CenterPermission => _frameIntegrator.Permission;
 
     public CognitiveController(IPolicy policy, SkillExecutor skillExecutor)
     {
         _policy = policy;
         _skillExecutor = skillExecutor;
+        _integrationBridge = new IntegrationBridge(_frameIntegrator, _zScores);
     }
 
     /// <summary>
@@ -124,6 +133,23 @@ public sealed class CognitiveController
         // Build belief candidate references
         _refBuilder.AfterFusion(_rawBelief, _currentFeeling, _zScores);
 
+        // === STAGE 3.4: FRAME INTEGRATION (CENTER) ===
+        // The neutral opposite - computes transformation between local and global frames
+        // Outputs: Permission, Coherence, Modulation signals to BOTH sides
+        float gapPressure = _refBuilder.Gaps.TotalGapPressure;
+        var integrationState = _integrationBridge.Update(
+            _currentFeeling,
+            gapPressure,
+            predictionConfidence: _rawBelief.Confidence,
+            patternMatch: 1f - _rawBelief.AudioVisualConflict,
+            immediacy: _currentFeeling.MustActNow ? 0.9f : _currentFeeling.Urgency);
+
+        // Set directional bias based on current threat assessment
+        _integrationBridge.SetDirection(
+            magnitude: _rawBelief.ThreatLevel,
+            alignment: _currentFeeling.OutcomeTrend,
+            novelty: _zScores.Z2_BeliefStability > 1f ? 0.7f : 0.3f);
+
         // === STAGE 3.5: CUE EVALUATION ===
         // Evaluate cues to get strain discount
         // Cues that reliably predict survival earn the right to reduce strain pressure
@@ -147,9 +173,10 @@ public sealed class CognitiveController
         // Build context for gate validation
         // Include expectation gap pressure in inhibition check
         // (what we haven't thought about can inhibit emission)
-        float gapPressure = _refBuilder.Gaps.TotalGapPressure;
+        // Use CENTER permission signal to gate action
         bool isInhibited = (_currentFeeling.ValidityCompromised && _currentFeeling.ShouldHesitate)
-                        || (gapPressure > 0.6f && !_currentFeeling.MustActNow);
+                        || (gapPressure > 0.6f && !_currentFeeling.MustActNow)
+                        || _integrationBridge.ShouldInhibit();
         _currentGateContext = BindingValidator.BuildContext(
             _currentBindState,
             _currentFeeling.Validity - gapPressure * 0.2f, // Gaps reduce effective validity
@@ -369,6 +396,7 @@ public sealed class CognitiveController
         var zInfo = _zScores.GetDiagnostics();
         var cueInfo = _cueRegistry.GetSummary();
         var refInfo = _refBuilder.GetDiagnostics();
+        var centerInfo = _integrationBridge.GetDiagnostics();
 
         return $"""
             === COGNITIVE STATE ===
@@ -381,6 +409,7 @@ public sealed class CognitiveController
             {zInfo}
             {cueInfo}
             {refInfo}
+            {centerInfo}
             =======================
             """;
     }

@@ -186,8 +186,9 @@ public sealed class ReferenceGraph
 
     /// <summary>
     /// Update validity for all references based on current cognitive state.
+    /// Includes Z context for diversity tracking.
     /// </summary>
-    public void UpdateValidities(float strainDelta, float outcomeDelta)
+    public void UpdateValidities(float strainDelta, float outcomeDelta, float z0 = 0f, float z1 = 0f, float z4 = 0f)
     {
         lock (_lock)
         {
@@ -201,7 +202,26 @@ public sealed class ReferenceGraph
 
             foreach (var node in recent)
             {
-                node.RecordValidation(survived, validityDelta);
+                // Pass Z context for diversity tracking
+                node.RecordValidation(survived, validityDelta, z0, z1, z4);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Apply gap pressure to all Inherited references.
+    /// Sustained gap pressure can demote even Inherited refs.
+    /// Inheritance is revocable trust, not permanent truth.
+    /// </summary>
+    public void ApplyGapPressureToInherited(float gapPressure)
+    {
+        if (gapPressure < 0.1f) return;
+
+        lock (_lock)
+        {
+            foreach (var node in _nodes.Values.Where(n => n.Bind == BindState.Inherited))
+            {
+                node.ApplyGapPressure(gapPressure);
             }
         }
     }
