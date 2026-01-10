@@ -40,12 +40,12 @@ public sealed class IntegrationBridge
         float patternMatch,
         float immediacy = 0f)
     {
-        // Get current Z values
-        float z0 = _zStack.GetLevel(0)?.Current ?? 0f;
-        float z1 = _zStack.GetLevel(1)?.Current ?? 0f;
-        float z2 = _zStack.GetLevel(2)?.Current ?? 0f;
-        float z3 = _zStack.GetLevel(3)?.Current ?? 0f;
-        float z4 = _zStack.GetLevel(4)?.Current ?? 0f;
+        // Get current Z values from the stack's properties
+        float z0 = (_zStack.Z0.Vision_Motion + _zStack.Z0.Audio_Level) / 2f; // Sensory composite
+        float z1 = _zStack.Z1_PerceptualAgreement;
+        float z2 = _zStack.Z2_BeliefStability;
+        float z3 = _zStack.Z3_ControlEfficacy;
+        float z4 = _zStack.Z4_GlobalCoherence;
 
         // Map to local frame (right brain)
         _integrator.UpdateLocalFrame(
