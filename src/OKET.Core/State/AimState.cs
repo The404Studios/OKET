@@ -1,5 +1,4 @@
 using OKET.Core.Types;
-using OKET.Core.Detection;
 
 namespace OKET.Core.State;
 
@@ -12,7 +11,7 @@ public sealed class AimState
     public Vector2 CrosshairPosition { get; init; }
 
     /// <summary>Current target (if any).</summary>
-    public Detection? Target { get; init; }
+    public OKET.Core.Detection.Detection? Target { get; init; }
 
     /// <summary>Screen-space offset from crosshair to target aim point.</summary>
     public Vector2 OffsetToTarget { get; init; }

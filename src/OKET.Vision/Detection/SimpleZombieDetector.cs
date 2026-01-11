@@ -20,13 +20,13 @@ public sealed class SimpleZombieDetector : IObjectDetector
     };
 
     // Colors commonly associated with zombies in GMod ZS
-    private static readonly (byte R, byte G, byte B)[] ZombieColors = new[]
-    {
-        (100, 80, 60),   // Brown/tan skin
-        (80, 100, 80),   // Greenish zombie
-        (60, 60, 80),    // Grayish
-        (120, 80, 80),   // Reddish
-    };
+    private static readonly (byte R, byte G, byte B)[] ZombieColors =
+    [
+        ((byte)100, (byte)80, (byte)60),   // Brown/tan skin
+        ((byte)80, (byte)100, (byte)80),   // Greenish zombie
+        ((byte)60, (byte)60, (byte)80),    // Grayish
+        ((byte)120, (byte)80, (byte)80),   // Reddish
+    ];
 
     public Task LoadAsync(string modelPath, CancellationToken ct = default)
     {
