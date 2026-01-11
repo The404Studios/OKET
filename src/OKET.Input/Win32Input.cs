@@ -196,7 +196,7 @@ public sealed class Win32Input : IInputController
     {
         if (!_isEnabled) return;
 
-        var flags = button == 0 ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+        uint flags = button == 0 ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
 
         var input = new INPUT
         {
@@ -215,7 +215,7 @@ public sealed class Win32Input : IInputController
 
     public void MouseUp(int button = 0)
     {
-        var flags = button == 0 ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
+        uint flags = button == 0 ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
 
         var input = new INPUT
         {
@@ -256,12 +256,12 @@ public sealed class Win32Input : IInputController
 
     private const int INPUT_MOUSE = 0;
     private const int INPUT_KEYBOARD = 1;
-    private const int KEYEVENTF_KEYUP = 0x0002;
-    private const int MOUSEEVENTF_MOVE = 0x0001;
-    private const int MOUSEEVENTF_LEFTDOWN = 0x0002;
-    private const int MOUSEEVENTF_LEFTUP = 0x0004;
-    private const int MOUSEEVENTF_RIGHTDOWN = 0x0008;
-    private const int MOUSEEVENTF_RIGHTUP = 0x0010;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint MOUSEEVENTF_MOVE = 0x0001;
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

@@ -313,7 +313,7 @@ public sealed class ZombieSurvivalAgent : IDisposable
 /// <summary>
 /// Configuration for the agent.
 /// </summary>
-public sealed class AgentConfig
+public sealed record AgentConfig
 {
     public bool UseDxgiCapture { get; init; } = true;
     public bool UseNeuralDetector { get; init; } = false;
