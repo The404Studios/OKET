@@ -68,6 +68,9 @@ public sealed class BeliefState
 
     // --- Derived states ---
 
+    /// <summary>Conflict between audio and visual modalities [0, 1]. Inverse of SensoryAgreement.</summary>
+    public float AudioVisualConflict => 1f - SensoryAgreement;
+
     public bool IsUnderAttack => ThreatLevel > 0.5f && ThreatProximity > 0.5f;
     public bool IsSafe => ThreatLevel < 0.2f;
     public bool NeedsReload => ReloadState == ReloadBelief.Empty && ReloadConfidence > 0.5f;
