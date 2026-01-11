@@ -1,6 +1,6 @@
 using OKET.Core.Types;
-using OKET.Core.Detection;
 using OKET.Core.Interfaces;
+using CoreDetection = OKET.Core.Detection;
 
 namespace OKET.Vision.Detection;
 
@@ -13,10 +13,10 @@ public sealed class SimpleZombieDetector : IObjectDetector
     public bool IsReady => true;
     public float ConfidenceThreshold { get; set; } = 0.3f;
 
-    public IReadOnlyList<DetectionClass> SupportedClasses { get; } = new[]
+    public IReadOnlyList<CoreDetection.DetectionClass> SupportedClasses { get; } = new[]
     {
-        DetectionClass.Zombie,
-        DetectionClass.Headcrab
+        CoreDetection.DetectionClass.Zombie,
+        CoreDetection.DetectionClass.Headcrab
     };
 
     // Colors commonly associated with zombies in GMod ZS
@@ -34,10 +34,10 @@ public sealed class SimpleZombieDetector : IObjectDetector
         return Task.CompletedTask;
     }
 
-    public Task<DetectionResult> DetectAsync(Frame frame, CancellationToken ct = default)
+    public Task<CoreDetection.DetectionResult> DetectAsync(Frame frame, CancellationToken ct = default)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var detections = new List<Detection>();
+        var detections = new List<CoreDetection.Detection>();
 
         // Scan for zombie-colored regions
         // This is a simplified blob detection approach
@@ -69,9 +69,9 @@ public sealed class SimpleZombieDetector : IObjectDetector
             // Estimate size for classification
             bool isSmall = box.Area < 5000;
 
-            detections.Add(new Detection
+            detections.Add(new CoreDetection.Detection
             {
-                Class = isSmall ? DetectionClass.Headcrab : DetectionClass.Zombie,
+                Class = isSmall ? CoreDetection.DetectionClass.Headcrab : CoreDetection.DetectionClass.Zombie,
                 Confidence = Math.Min(confidence, 0.6f), // Cap confidence for heuristic detector
                 Box = box,
                 FrameId = frame.Id,
@@ -81,7 +81,7 @@ public sealed class SimpleZombieDetector : IObjectDetector
 
         sw.Stop();
 
-        return Task.FromResult(new DetectionResult
+        return Task.FromResult(new CoreDetection.DetectionResult
         {
             FrameId = frame.Id,
             InferenceTimeMs = sw.ElapsedMilliseconds,

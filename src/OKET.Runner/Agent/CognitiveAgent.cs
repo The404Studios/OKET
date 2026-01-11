@@ -55,7 +55,7 @@ public sealed class CognitiveAgent : IDisposable
 
     public bool IsRunning => _isRunning;
     public GameState? CurrentState => _lastState;
-    public BeliefState? CurrentBelief => _cognitiveController.CurrentBelief;
+    public BeliefState? CurrentBelief => _cognitiveController.CommittedBelief;
     public InteroceptiveState? CurrentFeeling => _cognitiveController.CurrentFeeling;
     public PerformanceMonitor Performance => _perfMonitor;
 
@@ -212,6 +212,12 @@ public sealed class CognitiveAgent : IDisposable
         // Get audio snapshot
         var audioSnapshot = _audioSource.GetSnapshot();
 
+        // Apply perception modulation to detector threshold
+        // Low modulation = be conservative (higher threshold)
+        // High modulation = be aggressive (lower threshold)
+        float perceptionMod = _cognitiveController.PerceptionModulation;
+        _detector.ConfidenceThreshold = Math.Clamp(0.6f - (perceptionMod - 1f) * 0.15f, 0.3f, 0.8f);
+
         // Run object detection
         var detections = await _detector.DetectAsync(frame, ct);
 
@@ -280,7 +286,7 @@ public sealed class CognitiveAgent : IDisposable
         // Periodic diagnostics
         if (_perfMonitor.TotalFrames % 150 == 0)
         {
-            var belief = _cognitiveController.CurrentBelief;
+            var belief = _cognitiveController.CommittedBelief;
             var feeling = _cognitiveController.CurrentFeeling;
 
             _logger.LogDebug(
@@ -317,7 +323,7 @@ public sealed class CognitiveAgent : IDisposable
 
     private StepOutcome CalculateOutcome(GameState state)
     {
-        var belief = _cognitiveController.CurrentBelief;
+        var belief = _cognitiveController.CommittedBelief;
         int healthDelta = _lastState != null ? state.Hud.Health - _lastState.Hud.Health : 0;
 
         float reward = 0f;
