@@ -110,18 +110,31 @@ public sealed class CognitiveController
         float prevStrain = _zScores.SystemStrain;
         float prevOutcome = _currentFeeling?.OutcomeTrend ?? 0f;
 
+        // === STAGE 0: ACTIVATION GATE ===
+        // Route new perceptions through activation gate
+        // This controls whether new sensory information can enter the system
+        var activationResult = _gateController.RouteActivation();
+        float activationModulation = activationResult.Modulation;
+
         // === STAGE 1: Z-SCORE STACK (Z₀ → Z₁ → Z₂/Z₃ → Z₄) ===
         var zScoreInputs = _zScoreComputer.ComputeInputs(gameState, audioSnapshot, _lastPlan);
         _zScores.Update(zScoreInputs);
 
         // === STAGE 1.5: REFERENCE MEMORY - PERCEPTION ===
         // Build references from what "thinking heard and saw"
-        _refBuilder.AfterPerception(gameState, audioSnapshot, _zScores);
+        // Only if activation permitted
+        if (activationResult.Permitted)
+        {
+            _refBuilder.AfterPerception(gameState, audioSnapshot, _zScores);
+        }
 
         // === STAGE 2: MULTIMODAL FUSION ===
         // Uses Z₀, Z₁ implicitly through the fusion algorithm
         // Apply modulation from CENTER (using previous frame's values for causality)
-        _fusion.SetModulation(_gateController.PerceptionModulation, _gateController.PredictionModulation);
+        // Also apply activation modulation to further gate perception sensitivity
+        _fusion.SetModulation(
+            _gateController.PerceptionModulation * activationModulation,
+            _gateController.PredictionModulation);
         _rawBelief = _fusion.Fuse(gameState, audioSnapshot);
 
         // === STAGE 3: INTEROCEPTION (takes Z₄ as INPUT) ===
@@ -162,8 +175,24 @@ public sealed class CognitiveController
         float cueStrainDiscount = _cueRegistry.Evaluate(_zScores, _currentFeeling, _rawBelief);
         _lastStrainBeforeDiscount = _zScores.SystemStrain;
 
-        // === STAGE 4: MODULATE BELIEF BASED ON FEELING ===
-        var modulatedBelief = ModulateBelief(_rawBelief, _currentFeeling);
+        // === STAGE 4: MODULATE BELIEF BASED ON FEELING (gated transform) ===
+        // Route through transform gate to validate belief transformation
+        var transformResult = _gateController.RouteTransform();
+        BeliefState modulatedBelief;
+
+        if (transformResult.Permitted)
+        {
+            // Full transformation allowed
+            modulatedBelief = ModulateBelief(_rawBelief, _currentFeeling);
+        }
+        else
+        {
+            // Transform denied - use conservative modulation
+            modulatedBelief = ModulateBelief(_rawBelief, _currentFeeling) with
+            {
+                Confidence = _rawBelief.Confidence * 0.7f * transformResult.Modulation
+            };
+        }
 
         // === STAGE 4.5: UPDATE BIND STATE ===
         // Track information binding topology

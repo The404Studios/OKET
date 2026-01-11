@@ -212,6 +212,12 @@ public sealed class CognitiveAgent : IDisposable
         // Get audio snapshot
         var audioSnapshot = _audioSource.GetSnapshot();
 
+        // Apply perception modulation to detector threshold
+        // Low modulation = be conservative (higher threshold)
+        // High modulation = be aggressive (lower threshold)
+        float perceptionMod = _cognitiveController.PerceptionModulation;
+        _detector.ConfidenceThreshold = Math.Clamp(0.6f - (perceptionMod - 1f) * 0.15f, 0.3f, 0.8f);
+
         // Run object detection
         var detections = await _detector.DetectAsync(frame, ct);
 
