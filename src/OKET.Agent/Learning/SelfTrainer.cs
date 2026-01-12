@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OKET.Core.State;
 using OKET.Core.Actions;
+using OKET.Agent.Learning.Knowledge;
 
 namespace OKET.Agent.Learning;
 
@@ -11,6 +12,7 @@ namespace OKET.Agent.Learning;
 public sealed class TrainingConfig
 {
     public string ModelDirectory { get; init; } = "models";
+    public string KnowledgeDirectory { get; init; } = "knowledge";
     public string CheckpointPrefix { get; init; } = "policy";
     public int SaveIntervalUpdates { get; init; } = 100;
     public int LogIntervalUpdates { get; init; } = 10;
@@ -19,6 +21,8 @@ public sealed class TrainingConfig
     public bool AutoSaveOnImprovement { get; init; } = true;
     public float InitialExplorationBonus { get; init; } = 0.1f;
     public int ExplorationDecaySteps { get; init; } = 100_000;
+    public bool EnableKnowledgeOrganizer { get; init; } = true;
+    public int KnowledgeDiscoveryInterval { get; init; } = 1000;
 }
 
 /// <summary>
@@ -39,7 +43,14 @@ public sealed class TrainingSession
 
 /// <summary>
 /// Self-trainer orchestrator that manages the entire training lifecycle.
-/// Collects experiences during gameplay and periodically trains the policy.
+/// Implements the knowledge cycle: GAIN → HOLD → CARRY → MULTIPLY → EMBODY → LOOP
+///
+/// - GAIN: Acquire new knowledge through pattern detection
+/// - HOLD: Persist knowledge in hierarchical organization (Laws→Rules→...→Traditions)
+/// - CARRY: Transfer knowledge across contexts via knowledge queries
+/// - MULTIPLY: Spread successful patterns through promotion
+/// - EMBODY: Internalize knowledge into neural policy behavior
+/// - LOOP: Continuous refinement through observation and reorganization
 /// </summary>
 public sealed class SelfTrainer : IDisposable
 {
@@ -49,6 +60,9 @@ public sealed class SelfTrainer : IDisposable
     private readonly ExperienceBuffer _buffer;
     private readonly TrainingConfig _config;
     private readonly TrainingSession _session;
+
+    // Knowledge organization (Law of Potential)
+    private readonly KnowledgeOrganizer? _knowledge;
 
     // Current trajectory being collected
     private readonly Trajectory _currentTrajectory = new();
@@ -70,6 +84,7 @@ public sealed class SelfTrainer : IDisposable
 
     public NeuralPolicy Policy => _policy;
     public TrainingSession Session => _session;
+    public KnowledgeOrganizer? Knowledge => _knowledge;
     public bool IsCollecting => _isCollecting;
     public int TimestepsSinceUpdate => _timestepsSinceUpdate;
     public float MeanRecentReward => _recentRewards.Count > 0 ? _recentRewards.Average() : 0;
@@ -89,6 +104,25 @@ public sealed class SelfTrainer : IDisposable
         _session = new TrainingSession { StartTime = DateTime.UtcNow };
 
         Directory.CreateDirectory(_config.ModelDirectory);
+
+        // Initialize knowledge organizer if enabled
+        if (_config.EnableKnowledgeOrganizer)
+        {
+            var knowledgePath = Path.Combine(_config.KnowledgeDirectory, "knowledge_base.json");
+            _knowledge = new KnowledgeOrganizer(
+                discoveryInterval: _config.KnowledgeDiscoveryInterval,
+                persistencePath: knowledgePath);
+
+            // Try to load existing knowledge
+            if (_knowledge.Load())
+            {
+                _logger?.LogInformation("Loaded existing knowledge base with {Count} units", _knowledge.KnowledgeCount);
+            }
+            else
+            {
+                _logger?.LogInformation("Starting with fresh knowledge base");
+            }
+        }
     }
 
     /// <summary>
@@ -113,6 +147,7 @@ public sealed class SelfTrainer : IDisposable
     /// <summary>
     /// Called at the start of each step to get the action.
     /// Returns the action to take and stores state for later experience creation.
+    /// Integrates knowledge-based guidance with neural policy (CARRY + EMBODY).
     /// </summary>
     public (StrategicMode mode, float confidence) BeginStep(GameState state)
     {
@@ -130,6 +165,29 @@ public sealed class SelfTrainer : IDisposable
         _lastLogProb = logProb;
         _lastValue = value;
 
+        // CARRY: Query knowledge for guidance
+        if (_knowledge != null)
+        {
+            var suggestion = _knowledge.GetSuggestedAction(features);
+            if (suggestion.HasValue && suggestion.Value.confidence > 0.8f)
+            {
+                // High-confidence knowledge overrides policy (EMBODY)
+                action = suggestion.Value.action;
+                _logger?.LogDebug("Knowledge override: {Reason}", suggestion.Value.reason);
+            }
+            else
+            {
+                // Get action modifiers from covenants and principles
+                var modifiers = _knowledge.GetActionModifiers(features);
+                if (modifiers.TryGetValue("risk_aversion", out var riskAversion) && riskAversion > 0.5f)
+                {
+                    // Knowledge says be cautious - bias toward defensive actions
+                    if (action == 1) // Fight
+                        action = Random.Shared.NextDouble() < riskAversion ? 2 : action; // Maybe Kite instead
+                }
+            }
+        }
+
         // Add exploration bonus early in training (encourages trying different strategies)
         float explorationBonus = GetExplorationBonus();
         if (Random.Shared.NextDouble() < explorationBonus)
@@ -146,6 +204,7 @@ public sealed class SelfTrainer : IDisposable
 
     /// <summary>
     /// Called at the end of each step to record the outcome.
+    /// Implements GAIN phase - observing and recording for knowledge discovery.
     /// </summary>
     public void EndStep(GameState nextState, float reward, bool done)
     {
@@ -168,6 +227,10 @@ public sealed class SelfTrainer : IDisposable
 
         _currentTrajectory.Add(experience);
         _buffer.Add(experience);
+
+        // GAIN: Feed observation to knowledge organizer
+        // This enables the LOOP: observe → discover patterns → organize → apply
+        _knowledge?.Observe(_lastState, _lastAction, reward, nextFeatures, done);
 
         _episodeReward += reward;
         _episodeLength++;
@@ -425,21 +488,36 @@ public sealed class SelfTrainer : IDisposable
         }
     }
 
-    public string GetDiagnostics() => $"""
-        === SELF-TRAINER ===
-        Timesteps: {_session.TotalTimesteps:N0}
-        Episodes: {_session.TotalEpisodes:N0}
-        Updates: {_session.TotalUpdates:N0}
-        Mean Reward (100 ep): {MeanRecentReward:F2}
-        Best Reward: {_session.BestMeanReward:F2}
-        Mean Length (100 ep): {MeanRecentLength:F1}
-        Exploration Bonus: {GetExplorationBonus():F3}
-        Collecting: {_isCollecting}
-        {_buffer.GetDiagnostics()}
-        {_trainer.GetDiagnostics()}
-        {_policy.GetDiagnostics()}
-        ====================
-        """;
+    public string GetDiagnostics()
+    {
+        var knowledgeInfo = _knowledge?.GetDiagnostics() ?? "Knowledge: disabled";
+
+        return $"""
+            === SELF-TRAINER ===
+            Timesteps: {_session.TotalTimesteps:N0}
+            Episodes: {_session.TotalEpisodes:N0}
+            Updates: {_session.TotalUpdates:N0}
+            Mean Reward (100 ep): {MeanRecentReward:F2}
+            Best Reward: {_session.BestMeanReward:F2}
+            Mean Length (100 ep): {MeanRecentLength:F1}
+            Exploration Bonus: {GetExplorationBonus():F3}
+            Collecting: {_isCollecting}
+
+            === KNOWLEDGE CYCLE ===
+            GAIN:     {_knowledge?.TotalObservations ?? 0:N0} observations
+            HOLD:     {_knowledge?.KnowledgeCount ?? 0} knowledge units
+            CARRY:    via queries during BeginStep
+            MULTIPLY: via promotion/demotion
+            EMBODY:   via action overrides
+            LOOP:     continuous discovery
+
+            {_buffer.GetDiagnostics()}
+            {_trainer.GetDiagnostics()}
+            {_policy.GetDiagnostics()}
+            {knowledgeInfo}
+            ====================
+            """;
+    }
 
     public void Dispose()
     {
@@ -450,6 +528,10 @@ public sealed class SelfTrainer : IDisposable
         {
             SaveCheckpoint("final");
         }
+
+        // HOLD: Persist knowledge to disk
+        _knowledge?.Save();
+        _logger?.LogInformation("Knowledge base saved with {Count} units", _knowledge?.KnowledgeCount ?? 0);
 
         _trainer.Dispose();
         _policy.Dispose();
