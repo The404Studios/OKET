@@ -514,6 +514,234 @@ public sealed class KnowledgeOrganizer
             Confidence = 0.75f,
             Tags = new() { "movement", "combat", "caution" }
         });
+
+        // === ZOMBIE SURVIVAL SPECIFIC KNOWLEDGE ===
+
+        // Policy: Fight when healthy and have ammo
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "policy_fight_ready",
+            Level = KnowledgeLevel.Policy,
+            Description = "Engage enemies when healthy and armed",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "health > 0.5 AND ammo > 0.3 AND threats > 0",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "health", Operator = ComparisonOp.GreaterThan, Threshold = 0.5f, FeatureIndex = FeatureIndices.Health },
+                    new() { Feature = "ammo_clip", Operator = ComparisonOp.GreaterThan, Threshold = 0.3f, FeatureIndex = FeatureIndices.AmmoClip },
+                    new() { Feature = "threats_in_fov", Operator = ComparisonOp.GreaterThan, Threshold = 0, FeatureIndex = FeatureIndices.ThreatsInFov }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "action=Fight",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "suggested_action", Operator = ComparisonOp.Equal, Threshold = 1 } // Fight = 1
+                }
+            },
+            Confidence = 0.8f,
+            Tags = new() { "policy", "combat", "Fight" }
+        });
+
+        // Policy: Kite when overwhelmed or hurt
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "policy_kite_danger",
+            Level = KnowledgeLevel.Policy,
+            Description = "Retreat while fighting when in danger",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "danger > 0.6 OR health < 0.4",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "danger_level", Operator = ComparisonOp.GreaterThan, Threshold = 0.5f, FeatureIndex = FeatureIndices.DangerLevel }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "action=Kite",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "suggested_action", Operator = ComparisonOp.Equal, Threshold = 2 } // Kite = 2
+                }
+            },
+            Confidence = 0.8f,
+            Tags = new() { "policy", "survival", "Kite" }
+        });
+
+        // Condition: Reload when clip empty
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "condition_reload_empty",
+            Level = KnowledgeLevel.Condition,
+            Description = "Reload immediately when magazine is empty",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "ammo_clip = 0 AND ammo_reserve > 0",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "ammo_clip", Operator = ComparisonOp.LessOrEqual, Threshold = 0.05f, FeatureIndex = FeatureIndices.AmmoClip }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "action=Reload",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "suggested_action", Operator = ComparisonOp.Equal, Threshold = 3 } // Reload = 3
+                }
+            },
+            Confidence = 0.9f,
+            Tags = new() { "condition", "ammo", "Reload" }
+        });
+
+        // Condition: Unstick when stuck
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "condition_unstick",
+            Level = KnowledgeLevel.Condition,
+            Description = "Try to get unstuck when movement is blocked",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "is_stuck = 1",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "is_stuck", Operator = ComparisonOp.GreaterThan, Threshold = 0.5f, FeatureIndex = FeatureIndices.IsStuck }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "action=Unstick",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "suggested_action", Operator = ComparisonOp.Equal, Threshold = 9 } // Unstick = 9
+                }
+            },
+            Confidence = 0.9f,
+            Tags = new() { "condition", "movement", "Unstick" }
+        });
+
+        // Principle: Headshots deal more damage
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "principle_headshots",
+            Level = KnowledgeLevel.Principle,
+            Description = "Aiming for the head deals more damage to zombies",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "has_target AND is_on_target",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "has_target", Operator = ComparisonOp.GreaterThan, Threshold = 0.5f, FeatureIndex = FeatureIndices.HasTarget }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "aim_high_beneficial",
+                Conditions = new()
+            },
+            Confidence = 0.7f,
+            Tags = new() { "combat", "aim", "principle" }
+        });
+
+        // Principle: Close zombies are more dangerous
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "principle_proximity_danger",
+            Level = KnowledgeLevel.Principle,
+            Description = "Nearby zombies pose greater threat - prioritize or retreat",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "nearest_threat_dist < 0.3",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "nearest_threat_dist", Operator = ComparisonOp.LessThan, Threshold = 0.3f, FeatureIndex = FeatureIndices.NearestThreatDist }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "high_urgency",
+                Conditions = new()
+            },
+            Confidence = 0.8f,
+            Tags = new() { "combat", "danger", "urgency", "principle" }
+        });
+
+        // Tradition: Strafe while shooting
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "tradition_strafe_shoot",
+            Level = KnowledgeLevel.Tradition,
+            Description = "Move side-to-side while engaging to be harder to hit",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "in_combat AND has_target",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "threats_in_fov", Operator = ComparisonOp.GreaterThan, Threshold = 0, FeatureIndex = FeatureIndices.ThreatsInFov },
+                    new() { Feature = "has_target", Operator = ComparisonOp.GreaterThan, Threshold = 0.5f, FeatureIndex = FeatureIndices.HasTarget }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "strafe_while_shooting",
+                Conditions = new()
+            },
+            Confidence = 0.7f,
+            Tags = new() { "combat", "movement", "tradition" }
+        });
+
+        // Tradition: Reload during lulls
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "tradition_tactical_reload",
+            Level = KnowledgeLevel.Tradition,
+            Description = "Reload when no immediate threats even if not empty",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "threats = 0 AND ammo_clip < 0.5",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "threats_in_fov", Operator = ComparisonOp.LessOrEqual, Threshold = 0, FeatureIndex = FeatureIndices.ThreatsInFov },
+                    new() { Feature = "ammo_clip", Operator = ComparisonOp.LessThan, Threshold = 0.5f, FeatureIndex = FeatureIndices.AmmoClip }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "action=Reload",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "suggested_action", Operator = ComparisonOp.Equal, Threshold = 3 } // Reload = 3
+                }
+            },
+            Confidence = 0.65f,
+            Tags = new() { "ammo", "tactical", "tradition", "Reload" }
+        });
+
+        // Covenant: Never stop moving in danger
+        AddKnowledge(new KnowledgeUnit
+        {
+            Id = "covenant_keep_moving",
+            Level = KnowledgeLevel.Covenant,
+            Description = "Always maintain movement when threats are present",
+            Antecedent = new KnowledgePattern
+            {
+                Expression = "threats > 0",
+                Conditions = new List<PatternCondition>
+                {
+                    new() { Feature = "threats_in_fov", Operator = ComparisonOp.GreaterThan, Threshold = 0, FeatureIndex = FeatureIndices.ThreatsInFov }
+                }
+            },
+            Consequent = new KnowledgePattern
+            {
+                Expression = "require_movement",
+                Conditions = new()
+            },
+            Confidence = 0.85f,
+            Tags = new() { "movement", "survival", "covenant" }
+        });
     }
 
     /// <summary>
