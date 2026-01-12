@@ -257,7 +257,7 @@ public sealed class ValenceAuthorizer
     /// <summary>
     /// Calculate confidence in transition.
     /// </summary>
-    private float CalculateTransitionConfidence(Valence requested, float signal)
+    private static float CalculateTransitionConfidence(Valence requested, float signal)
     {
         float signalStrength = Math.Abs(signal);
         float directionMatch = requested switch
@@ -432,7 +432,7 @@ public sealed class ValenceMetabolizer
     /// <summary>
     /// Calculate health-based signal.
     /// </summary>
-    private float CalculateHealthSignal(float[] state, float[] nextState)
+    private static float CalculateHealthSignal(float[] state, float[] nextState)
     {
         float currentHealth = state.Length > FeatureIndices.Health ? state[FeatureIndices.Health] : 1f;
         float nextHealth = nextState.Length > FeatureIndices.Health ? nextState[FeatureIndices.Health] : 1f;
@@ -452,7 +452,7 @@ public sealed class ValenceMetabolizer
     /// <summary>
     /// Calculate threat-based signal.
     /// </summary>
-    private float CalculateThreatSignal(float[] state, float[] nextState)
+    private static float CalculateThreatSignal(float[] state, float[] nextState)
     {
         float currentThreats = state.Length > FeatureIndices.ThreatsInFov ? state[FeatureIndices.ThreatsInFov] : 0f;
         float nextThreats = nextState.Length > FeatureIndices.ThreatsInFov ? nextState[FeatureIndices.ThreatsInFov] : 0f;
@@ -473,7 +473,7 @@ public sealed class ValenceMetabolizer
     /// <summary>
     /// Calculate progress-based signal.
     /// </summary>
-    private float CalculateProgressSignal(float[] state, float[] nextState, float reward)
+    private static float CalculateProgressSignal(float[] state, float[] nextState, float reward)
     {
         float wave = state.Length > FeatureIndices.Wave ? state[FeatureIndices.Wave] : 0f;
         float nextWave = nextState.Length > FeatureIndices.Wave ? nextState[FeatureIndices.Wave] : 0f;
@@ -490,7 +490,7 @@ public sealed class ValenceMetabolizer
     /// <summary>
     /// Determine which valence this experience belongs to.
     /// </summary>
-    private Valence DetermineValence(float contribution, float[] state, int action)
+    private static Valence DetermineValence(float contribution, float[] state, int action)
     {
         // Strong positive contribution → Positive valence
         if (contribution > 0.2f)
@@ -507,7 +507,7 @@ public sealed class ValenceMetabolizer
     /// <summary>
     /// Generate a lesson from this experience.
     /// </summary>
-    private string? GenerateLesson(float[] state, int action, float reward, Valence valence)
+    private static string? GenerateLesson(float[] state, int action, float reward, Valence valence)
     {
         string actionName = GetActionName(action);
 

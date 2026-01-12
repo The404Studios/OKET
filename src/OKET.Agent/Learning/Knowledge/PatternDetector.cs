@@ -381,7 +381,7 @@ public sealed class PatternDetector
         };
     }
 
-    private float CalculateCorrelation(float[] x, float[] y)
+    private static float CalculateCorrelation(float[] x, float[] y)
     {
         if (x.Length != y.Length || x.Length < 2) return 0;
 
@@ -402,7 +402,7 @@ public sealed class PatternDetector
         return denom > 0.0001f ? sumXY / denom : 0;
     }
 
-    private List<(int featureIdx, float threshold, bool isGreater)> FindDistinguishingFeatures(
+    private static List<(int featureIdx, float threshold, bool isGreater)> FindDistinguishingFeatures(
         List<float[]> positive,
         List<float[]> negative)
     {

@@ -87,10 +87,11 @@ public sealed class TrainableAgent : IDisposable
     public SelfTrainer Trainer => _selfTrainer;
     public NeuralPolicy Policy => _neuralPolicy;
 
-    public TrainableAgent(ILogger<TrainableAgent> logger, TrainableAgentConfig config)
+    public TrainableAgent(ILogger<TrainableAgent> logger, ILoggerFactory loggerFactory, TrainableAgentConfig config)
     {
         _logger = logger;
         _config = config;
+        var selfTrainerLogger = loggerFactory.CreateLogger<SelfTrainer>();
 
         // Initialize perception
         _frameSource = config.UseDxgiCapture
@@ -115,7 +116,7 @@ public sealed class TrainableAgent : IDisposable
             ModelDirectory = config.ModelDirectory,
             RolloutLength = config.RolloutLength
         };
-        _selfTrainer = new SelfTrainer(_neuralPolicy, ppoConfig, trainingConfig);
+        _selfTrainer = new SelfTrainer(_neuralPolicy, ppoConfig, trainingConfig, selfTrainerLogger);
 
         // Load existing model if available
         if (config.LoadExistingModel)
