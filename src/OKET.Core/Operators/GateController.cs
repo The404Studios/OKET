@@ -11,12 +11,18 @@ using OKET.Core.Integration;
 /// 2. CENTER permission is respected
 /// 3. Modulation flows to both sides equally
 /// 4. No information escapes validation
+/// 5. FEEDBACK: Gate outcomes backpropagate to adjust future behavior
+/// 6. BALANCE: Resistance adapts to load until stable
+/// 7. GAIN: Output exceeds input at equilibrium
 ///
 /// This is the "traffic control" that sits between perception and action.
 /// </summary>
 public sealed class GateController
 {
     private readonly BindingValidator _validator = new();
+
+    // Feedback system for backpropagation
+    private readonly GateFeedback _feedback = new();
 
     // Current gate context (updated each frame)
     private GateContext _context;
@@ -28,10 +34,18 @@ public sealed class GateController
     private float _perceptionModulation = 1f;
     private float _predictionModulation = 1f;
 
+    // Track gates used in current cycle for backpropagation
+    private readonly Dictionary<GateType, bool> _cycleGates = new();
+
     /// <summary>
     /// Current gate context.
     /// </summary>
     public GateContext Context => _context;
+
+    /// <summary>
+    /// Feedback system for backpropagation and stabilization.
+    /// </summary>
+    public GateFeedback Feedback => _feedback;
 
     /// <summary>
     /// Modulation signal for perception systems (right brain) [0, 1].
@@ -56,6 +70,16 @@ public sealed class GateController
     /// Gate execution statistics.
     /// </summary>
     public GateStats Stats => _stats;
+
+    /// <summary>
+    /// Current system gain (output/input ratio).
+    /// </summary>
+    public float SystemGain => _feedback.CurrentGain;
+
+    /// <summary>
+    /// Is the gate system in stable equilibrium?
+    /// </summary>
+    public bool IsStable => _feedback.IsStable;
 
     /// <summary>
     /// Update the gate context from current cognitive state.
@@ -88,15 +112,46 @@ public sealed class GateController
         // Update modulation signals from CENTER
         _perceptionModulation = centerState.LocalModulation;
         _predictionModulation = centerState.GlobalModulation;
+
+        // Apply feedback modulation to adjust based on learned patterns
+        ApplyFeedbackModulation();
+
+        // Clear cycle gates for new cycle
+        _cycleGates.Clear();
     }
 
     /// <summary>
     /// Attempt to execute a gate operation.
     /// Returns the result and whether it was permitted.
+    /// Integrates feedback for backpropagation.
     /// </summary>
     public GateResult TryGate(GateType gate)
     {
-        var validation = _validator.Validate(gate, _context);
+        // Get feedback modulation for this gate
+        var feedbackMod = _feedback.GetModulation(gate);
+
+        // Adjust context based on feedback
+        var adjustedContext = _context;
+        if (feedbackMod.Confidence > 0.3f)
+        {
+            // Apply feedback bias to validity threshold
+            adjustedContext = adjustedContext with
+            {
+                Validity = Math.Clamp(_context.Validity + feedbackMod.PermissionBias * 0.2f, 0f, 1f)
+            };
+        }
+
+        var validation = _validator.Validate(gate, adjustedContext);
+
+        // Track this gate for backpropagation
+        _cycleGates[gate] = validation.Permitted;
+
+        // Record in feedback system
+        _feedback.RecordGateOperation(
+            gate,
+            validation.Permitted,
+            _context.Validity,
+            _context.OutcomeTrend);
 
         if (validation.Permitted)
         {
@@ -121,6 +176,53 @@ public sealed class GateController
                 Modulation = 0f
             };
         }
+    }
+
+    /// <summary>
+    /// Apply feedback-based modulation to perception and prediction signals.
+    /// This is where backpropagation affects the real-time model.
+    /// </summary>
+    private void ApplyFeedbackModulation()
+    {
+        // Adjust perception modulation based on Activate gate feedback
+        var activateMod = _feedback.GetModulation(GateType.Activate);
+        if (activateMod.Confidence > 0.2f)
+        {
+            _perceptionModulation = Math.Clamp(
+                _perceptionModulation * (1f + activateMod.Gradient * 0.1f),
+                0.3f, 1.5f);
+        }
+
+        // Adjust prediction modulation based on Emit gate feedback
+        var emitMod = _feedback.GetModulation(GateType.Emit);
+        if (emitMod.Confidence > 0.2f)
+        {
+            _predictionModulation = Math.Clamp(
+                _predictionModulation * (1f + emitMod.Gradient * 0.1f),
+                0.3f, 1.5f);
+        }
+
+        // If system is unstable, dampen all modulation
+        if (!_feedback.IsStable)
+        {
+            float dampingFactor = Math.Max(0.5f, _feedback.CurrentGain);
+            _perceptionModulation *= dampingFactor;
+            _predictionModulation *= dampingFactor;
+        }
+
+        // Ensure resistance/load balance affects modulation
+        float balanceFactor = 1f / Math.Max(0.5f, _feedback.Resistance);
+        _perceptionModulation = Math.Clamp(_perceptionModulation * balanceFactor, 0.1f, 1f);
+        _predictionModulation = Math.Clamp(_predictionModulation * balanceFactor, 0.1f, 1f);
+    }
+
+    /// <summary>
+    /// Record cycle outcome for backpropagation.
+    /// Call at the end of each cognitive cycle.
+    /// </summary>
+    public void RecordCycleOutcome(float survivalScore, float progressScore, float strainDelta)
+    {
+        _feedback.RecordCycleOutcome(survivalScore, progressScore, strainDelta, _cycleGates);
     }
 
     /// <summary>
@@ -263,6 +365,15 @@ public sealed class GateController
         _context.DirectionViability > 0.3f;
 
     /// <summary>
+    /// Reset feedback on death/respawn.
+    /// </summary>
+    public void ResetFeedback()
+    {
+        _feedback.Reset();
+        _cycleGates.Clear();
+    }
+
+    /// <summary>
     /// Get comprehensive diagnostics.
     /// </summary>
     public string GetDiagnostics()
@@ -273,6 +384,8 @@ public sealed class GateController
             Recommended: {RecommendedGate}
             Modulation: perception={_perceptionModulation:F2}, prediction={_predictionModulation:F2}
             Mode: {(ShouldBeDefensive ? "DEFENSIVE" : CanActAggressively ? "AGGRESSIVE" : "CAUTIOUS")}
+            Gain: {SystemGain:F2}, Stable: {IsStable}
+            Resistance: {_feedback.Resistance:F2}, Load: {_feedback.Load:F2}
 
             Statistics:
             {_stats.GetSummary()}
