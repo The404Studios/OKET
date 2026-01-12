@@ -52,6 +52,11 @@ public sealed class CognitiveController
     private readonly BindingValidator _bindingValidator = new();
     private readonly GateController _gateController = new();
 
+    // Object-thought binding system
+    // PRINCIPLE: Every object must have a thought
+    private readonly ThoughtManager _thoughtManager = new();
+    private readonly ReactionPredictor _reactionPredictor = new();
+
     // Reference memory (operational understanding)
     private readonly ReferenceBuilder _refBuilder = new();
 
@@ -93,6 +98,12 @@ public sealed class CognitiveController
     public float PerceptionModulation => _gateController.PerceptionModulation;
     public float PredictionModulation => _gateController.PredictionModulation;
 
+    // Object-thought binding access
+    public ThoughtManager ThoughtManager => _thoughtManager;
+    public ReactionPredictor ReactionPredictor => _reactionPredictor;
+    public bool HasForcedAction => _thoughtManager.HasForcedAction;
+    public ObjectThought? MostUrgentThought => _thoughtManager.MostUrgent;
+
     public CognitiveController(IPolicy policy, SkillExecutor skillExecutor)
     {
         _policy = policy;
@@ -119,6 +130,11 @@ public sealed class CognitiveController
         // === STAGE 1: Z-SCORE STACK (Z₀ → Z₁ → Z₂/Z₃ → Z₄) ===
         var zScoreInputs = _zScoreComputer.ComputeInputs(gameState, audioSnapshot, _lastPlan);
         _zScores.Update(zScoreInputs);
+
+        // === STAGE 1.25: OBJECT-THOUGHT BINDING ===
+        // PRINCIPLE: Every detected object MUST have a thought
+        // Process all detections into thoughts before fusion
+        _thoughtManager.ProcessDetections(gameState.Detections, gameState.Frame);
 
         // === STAGE 1.5: REFERENCE MEMORY - PERCEPTION ===
         // Build references from what "thinking heard and saw"
@@ -151,6 +167,16 @@ public sealed class CognitiveController
         // === STAGE 3.25: REFERENCE MEMORY - FUSION ===
         // Build belief candidate references
         _refBuilder.AfterFusion(_rawBelief, _currentFeeling, _zScores);
+
+        // === STAGE 3.3: REACTION PREDICTION ===
+        // Use learned patterns to predict proper reaction for current context
+        // This integrates object-thought zones with situational learning
+        var reactionPrediction = _reactionPredictor.Predict(
+            _thoughtManager,
+            gameState.Hud.Health / 100f,
+            gameState.Hud.AmmoClip / Math.Max(1f, gameState.Hud.AmmoClip + gameState.Hud.AmmoReserve),
+            _zScores.SystemStrain,
+            _gateController.SystemGain);
 
         // === STAGE 3.4: FRAME INTEGRATION (CENTER) ===
         // The neutral opposite - computes transformation between local and global frames
@@ -209,9 +235,12 @@ public sealed class CognitiveController
         // Include expectation gap pressure in inhibition check
         // (what we haven't thought about can inhibit emission)
         // Use CENTER permission signal to gate action
+        // FORCED ACTION: If any thought is in force zone, action cannot be inhibited
+        bool hasForcedThought = _thoughtManager.HasForcedAction;
+        bool mustActNow = _currentFeeling.MustActNow || hasForcedThought;
         bool isInhibited = (_currentFeeling.ValidityCompromised && _currentFeeling.ShouldHesitate)
-                        || (gapPressure > 0.6f && !_currentFeeling.MustActNow)
-                        || _integrationBridge.ShouldInhibit();
+                        || (gapPressure > 0.6f && !mustActNow)
+                        || (_integrationBridge.ShouldInhibit() && !hasForcedThought);
         _currentGateContext = BindingValidator.BuildContext(
             _currentBindState,
             _currentFeeling.Validity - gapPressure * 0.2f, // Gaps reduce effective validity
@@ -219,7 +248,7 @@ public sealed class CognitiveController
             _zScores.SystemStrain - cueStrainDiscount + gapPressure * 0.3f, // Gaps add to strain
             isInhibited,
             _currentFeeling.OutcomeTrend,
-            _currentFeeling.MustActNow,
+            mustActNow,
             centerPermission: _frameIntegrator.Permission,           // CENTER permission gate
             centerCoherence: _frameIntegrator.Coherence,             // CENTER frame coherence
             directionViability: _frameIntegrator.DirectionViability); // CENTER direction check
@@ -232,7 +261,7 @@ public sealed class CognitiveController
             _zScores.SystemStrain - cueStrainDiscount + gapPressure * 0.3f,
             isInhibited,
             _currentFeeling.OutcomeTrend,
-            _currentFeeling.MustActNow,
+            mustActNow,
             integrationState);
 
         // === STAGE 6: BELIEF LOCK / HYSTERESIS GATE ===
@@ -253,6 +282,11 @@ public sealed class CognitiveController
         bool survived = !_committedState.ForcedUnlock && _currentFeeling.Validity > 0.35f;
         _cueRegistry.RecordOutcome(survived, strainDelta, outcomeDelta);
         _lastOutcomeTrend = outcomeDelta;
+
+        // === STAGE 6.6: THOUGHT OUTCOME RECORDING ===
+        // Record outcome for each thought - what was the result of our reaction?
+        // This is how prediction becomes understood over time
+        RecordThoughtOutcomes(gameState, committedMode, outcomeDelta, survived);
 
         // === STAGE 6.75: REFERENCE MEMORY - OUTCOME ===
         // Record outcome for reference memory (what happened after acting)
@@ -446,12 +480,110 @@ public sealed class CognitiveController
     }
 
     /// <summary>
+    /// Record outcomes for thoughts based on action results.
+    /// This closes the learning loop: detection → thought → action → outcome → learning.
+    /// </summary>
+    private void RecordThoughtOutcomes(
+        GameState gameState,
+        StrategicMode mode,
+        float outcomeDelta,
+        bool survived)
+    {
+        // Map strategic mode to thought action
+        var actionTaken = mode switch
+        {
+            StrategicMode.Fight => ThoughtAction.Engage,
+            StrategicMode.Kite => ThoughtAction.Engage, // Kiting is still engaging
+            StrategicMode.Seek => ThoughtAction.Approach,
+            StrategicMode.Idle => ThoughtAction.Observe,
+            StrategicMode.Unstick => ThoughtAction.Ignore,
+            _ => ThoughtAction.Observe
+        };
+
+        // Calculate outcome value [-1, 1]
+        float outcomeValue = outcomeDelta * 0.5f + (survived ? 0.5f : -0.5f);
+
+        // Record for forced thoughts (most important)
+        foreach (var thought in _thoughtManager.ForcedThoughts)
+        {
+            _thoughtManager.RecordOutcome(thought, actionTaken, outcomeValue);
+        }
+
+        // Record for primary target if present
+        var primaryTarget = gameState.Detections.PrimaryThreat;
+        if (primaryTarget != null)
+        {
+            _thoughtManager.RecordOutcome(primaryTarget.TrackId, actionTaken, outcomeValue);
+        }
+
+        // Record for reaction predictor if we had a prediction
+        if (_reactionPredictor.CurrentPrediction.Confidence > 0.2f)
+        {
+            // Build context pattern matching current state
+            var context = new ContextPattern
+            {
+                HealthBucket = gameState.Hud.Health switch
+                {
+                    < 20 => 0,
+                    < 40 => 1,
+                    < 70 => 2,
+                    _ => 3
+                },
+                AmmoBucket = gameState.Hud.AmmoClip switch
+                {
+                    < 3 => 0,
+                    < 10 => 1,
+                    < 20 => 2,
+                    _ => 3
+                },
+                ThreatBucket = _thoughtManager.TotalThreat switch
+                {
+                    < 0.3f => 0,
+                    < 0.7f => 1,
+                    < 1.5f => 2,
+                    _ => 3
+                },
+                OpportunityBucket = _thoughtManager.TotalOpportunity switch
+                {
+                    < 0.2f => 0,
+                    < 0.5f => 1,
+                    _ => 2
+                },
+                ZoneState = _thoughtManager.HasForcedAction ? ZoneState.Forced :
+                           _thoughtManager.TransitionThoughts.Any() ? ZoneState.Transition : ZoneState.Safe,
+                StrainLevel = _zScores.SystemStrain switch
+                {
+                    < 0.5f => 0,
+                    < 1.0f => 1,
+                    < 1.5f => 2,
+                    _ => 3
+                },
+                GainState = _gateController.SystemGain >= 1f ? GainState.Positive : GainState.Negative
+            };
+
+            // Map mode to reaction
+            var reaction = mode switch
+            {
+                StrategicMode.Fight => Reaction.Engage,
+                StrategicMode.Kite => Reaction.Kite,
+                StrategicMode.Seek => Reaction.Seek,
+                StrategicMode.Unstick => Reaction.Stabilize,
+                _ => Reaction.Observe
+            };
+
+            _reactionPredictor.RecordOutcome(context, reaction, outcomeValue, 30);
+        }
+    }
+
+    /// <summary>
     /// Reset state (e.g., on death/respawn).
     /// </summary>
     public void Reset()
     {
         _beliefLock.Reset();
         _gateController.ResetFeedback();
+        _thoughtManager.Reset();
+        _reactionPredictor.Reset();
         _rawBelief = null;
         _committedBelief = null;
         _currentFeeling = null;
@@ -479,6 +611,8 @@ public sealed class CognitiveController
         var centerInfo = _integrationBridge.GetDiagnostics();
         var gateInfo = _gateController.GetDiagnostics();
         var feedbackInfo = _gateController.Feedback.GetDiagnostics();
+        var thoughtInfo = _thoughtManager.GetDiagnostics();
+        var reactionInfo = _reactionPredictor.GetDiagnostics();
 
         return $"""
             === COGNITIVE STATE ===
@@ -496,6 +630,8 @@ public sealed class CognitiveController
             {centerInfo}
             {gateInfo}
             {feedbackInfo}
+            {thoughtInfo}
+            {reactionInfo}
             =======================
             """;
     }
