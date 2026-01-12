@@ -89,7 +89,7 @@ public sealed class SimpleZombieDetector : IObjectDetector
         });
     }
 
-    private float CalculateZombieScore(Frame frame, int cx, int cy, int radius)
+    private static float CalculateZombieScore(Frame frame, int cx, int cy, int radius)
     {
         float totalScore = 0;
         int samples = 0;
@@ -139,7 +139,7 @@ public sealed class SimpleZombieDetector : IObjectDetector
 
     private record Cluster(List<(int x, int y, float score)> Points);
 
-    private List<Cluster> ClusterCandidates(List<(int x, int y, float score)> candidates, int maxDist)
+    private static List<Cluster> ClusterCandidates(List<(int x, int y, float score)> candidates, int maxDist)
     {
         var clusters = new List<Cluster>();
         var used = new HashSet<int>();
@@ -181,7 +181,7 @@ public sealed class SimpleZombieDetector : IObjectDetector
         return clusters;
     }
 
-    private BoundingBox GetBoundingBox(List<(int x, int y, float score)> points, int padding)
+    private static BoundingBox GetBoundingBox(List<(int x, int y, float score)> points, int padding)
     {
         int minX = points.Min(p => p.x) - padding;
         int maxX = points.Max(p => p.x) + padding;

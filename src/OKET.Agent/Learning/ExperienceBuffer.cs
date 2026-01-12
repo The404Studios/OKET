@@ -174,7 +174,6 @@ public static class AdvantageComputation
         var returns = new float[n];
 
         float lastGaeLam = 0;
-        float lastValue = 0;
 
         // Process in reverse order
         for (int t = n - 1; t >= 0; t--)
