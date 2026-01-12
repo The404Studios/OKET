@@ -73,7 +73,7 @@ public sealed class FightSkill : SkillBase
         };
     }
 
-    private bool ShouldShoot(GameState state)
+    private static bool ShouldShoot(GameState state)
     {
         // Don't shoot if no target
         if (state.Aim.Target == null)

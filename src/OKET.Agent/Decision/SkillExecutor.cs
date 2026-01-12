@@ -57,7 +57,7 @@ public sealed class SkillExecutor
         return CreateIdlePlan(state);
     }
 
-    private ActionPlan CreateIdlePlan(GameState state)
+    private static ActionPlan CreateIdlePlan(GameState state)
     {
         return new ActionPlan
         {

@@ -162,7 +162,7 @@ public sealed class MultimodalFusion
         };
     }
 
-    private ModalityProposal ExtractHudProposal(HudState hud)
+    private static ModalityProposal ExtractHudProposal(HudState hud)
     {
         return new ModalityProposal
         {
@@ -367,7 +367,7 @@ public sealed class MultimodalFusion
         };
     }
 
-    private float CalculateBeliefDelta(BeliefState prev, BeliefState curr)
+    private static float CalculateBeliefDelta(BeliefState prev, BeliefState curr)
     {
         float delta = 0;
         delta += Math.Abs(prev.ThreatLevel - curr.ThreatLevel) * 0.3f;

@@ -287,7 +287,7 @@ public sealed class SelfTrainer : IDisposable
     /// Negative signal → avoid/retreat behaviors favored
     /// Near-zero signal → neutral/recalibration needed
     /// </summary>
-    private float CalculateValenceSignal(float[] features, int action)
+    private static float CalculateValenceSignal(float[] features, int action)
     {
         float signal = 0f;
 

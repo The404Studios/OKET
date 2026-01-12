@@ -4,7 +4,7 @@ namespace OKET.Core.Actions;
 /// A plan of actions to execute over time.
 /// Output from the decision layer, input to the actuation layer.
 /// </summary>
-public sealed class ActionPlan
+public sealed record ActionPlan
 {
     /// <summary>Frame ID this plan was created for.</summary>
     public long FrameId { get; init; }

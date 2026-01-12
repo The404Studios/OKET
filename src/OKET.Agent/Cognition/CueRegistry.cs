@@ -209,17 +209,17 @@ public sealed class CueRegistry
             "low_threat" => feeling.ThreatPressure < 0.3f,
             "moderate_threat" => feeling.ThreatPressure is >= 0.3f and <= 0.6f,
 
-            // Belief state cues
-            "has_target" => belief.PrimaryTarget != null,
-            "multiple_threats" => belief.DetectedEntities.Count(e => e.IsHostile) > 2,
-            "single_threat" => belief.DetectedEntities.Count(e => e.IsHostile) == 1,
-            "no_threats" => !belief.DetectedEntities.Any(e => e.IsHostile),
+            // Belief state cues (based on threat level since we don't have entity list in BeliefState)
+            "has_target" => belief.ThreatLevel > 0.1f && belief.ThreatProximity > 0.2f,
+            "multiple_threats" => belief.ThreatLevel > 0.6f,
+            "single_threat" => belief.ThreatLevel is > 0.1f and <= 0.6f,
+            "no_threats" => belief.ThreatLevel < 0.1f,
 
             // Combined cues (these are the powerful ones)
             "safe_to_commit" => zScores.SystemStrain < 1.0f && feeling.Validity > 0.5f && !feeling.ShouldHesitate,
             "danger_confirmed" => feeling.ThreatPressure > 0.5f && zScores.Z1_PerceptualAgreement > 0.3f,
             "should_retreat" => feeling.ThreatPressure > 0.7f && feeling.ControlConfidence < 0.4f,
-            "can_engage" => belief.PrimaryTarget != null && feeling.ControlConfidence > 0.5f && feeling.Validity > 0.5f,
+            "can_engage" => belief.ThreatLevel > 0.1f && feeling.ControlConfidence > 0.5f && feeling.Validity > 0.5f,
 
             _ => false
         };

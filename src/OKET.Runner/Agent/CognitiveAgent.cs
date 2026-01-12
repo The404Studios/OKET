@@ -307,7 +307,7 @@ public sealed class CognitiveAgent : IDisposable
         }
     }
 
-    private string GetDominantFeeling(InteroceptiveState? feeling)
+    private static string GetDominantFeeling(InteroceptiveState? feeling)
     {
         if (feeling == null) return "NONE";
 

@@ -286,7 +286,7 @@ public sealed class FrameIntegrator
     /// <summary>
     /// Coherence: overall quality of the integration.
     /// </summary>
-    private float ComputeCoherence(float agreement, float strain, float permission)
+    private static float ComputeCoherence(float agreement, float strain, float permission)
     {
         // Coherence is the transformation quality metric
         // High coherence = frames are well-synchronized
@@ -328,7 +328,7 @@ public sealed class FrameIntegrator
     /// <summary>
     /// Compute modulation signal for local frame (right brain).
     /// </summary>
-    private float ComputeLocalModulation(float coherence, float strain)
+    private static float ComputeLocalModulation(float coherence, float strain)
     {
         // Under low coherence: tell local to be more conservative
         // Under high strain: tell local to reduce load
@@ -340,7 +340,7 @@ public sealed class FrameIntegrator
     /// <summary>
     /// Compute modulation signal for global frame (left brain).
     /// </summary>
-    private float ComputeGlobalModulation(float coherence, float strain)
+    private static float ComputeGlobalModulation(float coherence, float strain)
     {
         // Under low coherence: tell global to widen patterns
         // Under high strain: tell global to simplify

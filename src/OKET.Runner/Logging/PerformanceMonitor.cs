@@ -55,7 +55,7 @@ public sealed class PerformanceMonitor
     public void RecordDecisionTime(double ms) => AddSample(_decisionTimes, ms);
     public void RecordActuationTime(double ms) => AddSample(_actuationTimes, ms);
 
-    private void AddSample(Queue<double> queue, double value)
+    private static void AddSample(Queue<double> queue, double value)
     {
         queue.Enqueue(value);
         while (queue.Count > SampleCount)
