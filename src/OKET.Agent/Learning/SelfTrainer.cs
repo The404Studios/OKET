@@ -51,6 +51,11 @@ public sealed class TrainingSession
 /// - MULTIPLY: Spread successful patterns through promotion
 /// - EMBODY: Internalize knowledge into neural policy behavior
 /// - LOOP: Continuous refinement through observation and reorganization
+///
+/// Valence System Integration:
+/// - AUTHORIZE: Validate mode transitions through ValenceAuthorizer
+/// - METABOLIZE: Process experiences into valence signals
+/// - RECALIBRATE: Enter neutral mode when signals are uncertain
 /// </summary>
 public sealed class SelfTrainer : IDisposable
 {
@@ -63,6 +68,10 @@ public sealed class SelfTrainer : IDisposable
 
     // Knowledge organization (Law of Potential)
     private readonly KnowledgeOrganizer? _knowledge;
+
+    // Valence system for emotional/motivational state
+    private readonly ValenceAuthorizer _valenceAuthorizer;
+    private readonly ValenceMetabolizer _valenceMetabolizer;
 
     // Current trajectory being collected
     private readonly Trajectory _currentTrajectory = new();
@@ -85,6 +94,9 @@ public sealed class SelfTrainer : IDisposable
     public NeuralPolicy Policy => _policy;
     public TrainingSession Session => _session;
     public KnowledgeOrganizer? Knowledge => _knowledge;
+    public ValenceAuthorizer ValenceAuthorizer => _valenceAuthorizer;
+    public ValenceMetabolizer ValenceMetabolizer => _valenceMetabolizer;
+    public ValenceState CurrentValence => _valenceAuthorizer.CurrentState;
     public bool IsCollecting => _isCollecting;
     public int TimestepsSinceUpdate => _timestepsSinceUpdate;
     public float MeanRecentReward => _recentRewards.Count > 0 ? _recentRewards.Average() : 0;
@@ -104,6 +116,20 @@ public sealed class SelfTrainer : IDisposable
         _session = new TrainingSession { StartTime = DateTime.UtcNow };
 
         Directory.CreateDirectory(_config.ModelDirectory);
+
+        // Initialize valence system for emotional/motivational learning
+        _valenceAuthorizer = new ValenceAuthorizer(
+            positiveThreshold: 0.4f,
+            negativeThreshold: -0.4f,
+            neutralThreshold: 0.15f,
+            minDurationBeforeSwitch: 10);
+        _valenceMetabolizer = new ValenceMetabolizer(
+            rewardWeight: 0.4f,
+            healthWeight: 0.3f,
+            threatWeight: 0.2f,
+            progressWeight: 0.1f);
+
+        _logger?.LogInformation("Valence system initialized (Positive/Negative/Neutral modes)");
 
         // Initialize knowledge organizer if enabled
         if (_config.EnableKnowledgeOrganizer)
@@ -148,6 +174,7 @@ public sealed class SelfTrainer : IDisposable
     /// Called at the start of each step to get the action.
     /// Returns the action to take and stores state for later experience creation.
     /// Integrates knowledge-based guidance with neural policy (CARRY + EMBODY).
+    /// Now includes VALENCE AUTHORIZATION for mode transitions.
     /// </summary>
     public (StrategicMode mode, float confidence) BeginStep(GameState state)
     {
@@ -188,6 +215,48 @@ public sealed class SelfTrainer : IDisposable
             }
         }
 
+        // VALENCE AUTHORIZATION: Check if action aligns with current valence state
+        var proposedValence = ActionValenceMapping.GetNaturalValence(action);
+        var currentValenceState = _valenceAuthorizer.CurrentState;
+
+        // Calculate urgency based on game state
+        float health = features.Length > FeatureIndices.Health ? features[FeatureIndices.Health] : 1f;
+        float dangerLevel = features.Length > FeatureIndices.DangerLevel ? features[FeatureIndices.DangerLevel] : 0f;
+        float urgency = dangerLevel > 0.7f || health < 0.3f ? 0.9f : dangerLevel;
+
+        // Get metabolizer's recommended valence based on accumulated experience
+        var recommendedValence = _valenceMetabolizer.GetRecommendedValence(features);
+
+        // Calculate signal strength based on state
+        float valenceSignal = CalculateValenceSignal(features, action);
+
+        // Request authorization for the proposed valence
+        var authorization = _valenceAuthorizer.RequestTransition(proposedValence, valenceSignal, urgency);
+
+        // If not authorized, consider alternative actions based on authorized valence
+        if (!authorization.IsAuthorized && !authorization.RequiresRecalibration)
+        {
+            // Switch to an action that matches the authorized/current valence
+            var authorizedActions = ActionValenceMapping.GetActionsForValence(authorization.AuthorizedValence);
+            if (authorizedActions.Length > 0)
+            {
+                action = authorizedActions[Random.Shared.Next(authorizedActions.Length)];
+                _logger?.LogDebug("Valence redirect: {Reason} -> action {Action}",
+                    authorization.Reason, action);
+            }
+        }
+
+        // If recalibration required, prefer neutral actions
+        if (authorization.RequiresRecalibration)
+        {
+            var neutralActions = ActionValenceMapping.GetActionsForValence(Valence.Neutral);
+            action = neutralActions[Random.Shared.Next(neutralActions.Length)];
+            _logger?.LogDebug("Valence recalibration: selecting neutral action {Action}", action);
+        }
+
+        // Accumulate signal for ongoing valence tracking
+        _valenceAuthorizer.AccumulateSignal(valenceSignal);
+
         // Add exploration bonus early in training (encourages trying different strategies)
         float explorationBonus = GetExplorationBonus();
         if (Random.Shared.NextDouble() < explorationBonus)
@@ -199,12 +268,56 @@ public sealed class SelfTrainer : IDisposable
         var mode = NeuralPolicy.ActionToMode(action);
         var confidence = _policy.GetActionProbabilities(features)[action];
 
-        return (mode, confidence);
+        // Adjust confidence based on valence alignment
+        if (authorization.IsAuthorized && currentValenceState.IsStable)
+        {
+            confidence *= 1.1f; // Boost confidence when valence-aligned
+        }
+        else if (authorization.RequiresRecalibration)
+        {
+            confidence *= 0.7f; // Reduce confidence during recalibration
+        }
+
+        return (mode, Math.Clamp(confidence, 0f, 1f));
+    }
+
+    /// <summary>
+    /// Calculate valence signal from current state and action.
+    /// Positive signal → approach/engage behaviors favored
+    /// Negative signal → avoid/retreat behaviors favored
+    /// Near-zero signal → neutral/recalibration needed
+    /// </summary>
+    private float CalculateValenceSignal(float[] features, int action)
+    {
+        float signal = 0f;
+
+        // Health factor: low health → negative signal
+        float health = features.Length > FeatureIndices.Health ? features[FeatureIndices.Health] : 1f;
+        signal += (health - 0.5f) * 0.4f; // -0.2 to +0.2
+
+        // Threat factor: many threats → negative signal
+        float threats = features.Length > FeatureIndices.ThreatsInFov ? features[FeatureIndices.ThreatsInFov] : 0f;
+        signal -= threats * 0.1f; // 0 to -0.5 (assuming max 5 threats)
+
+        // Danger level: high danger → negative signal
+        float danger = features.Length > FeatureIndices.DangerLevel ? features[FeatureIndices.DangerLevel] : 0f;
+        signal -= danger * 0.3f; // 0 to -0.3
+
+        // Ammo factor: good ammo → positive signal (can engage)
+        float ammo = features.Length > FeatureIndices.AmmoClip ? features[FeatureIndices.AmmoClip] : 1f;
+        signal += ammo * 0.2f; // 0 to +0.2
+
+        // Target availability: has target → slightly positive (opportunity)
+        float hasTarget = features.Length > FeatureIndices.HasTarget ? features[FeatureIndices.HasTarget] : 0f;
+        signal += hasTarget * 0.1f; // 0 to +0.1
+
+        return Math.Clamp(signal, -1f, 1f);
     }
 
     /// <summary>
     /// Called at the end of each step to record the outcome.
     /// Implements GAIN phase - observing and recording for knowledge discovery.
+    /// Now includes VALENCE METABOLIZATION for experience processing.
     /// </summary>
     public void EndStep(GameState nextState, float reward, bool done)
     {
@@ -213,12 +326,57 @@ public sealed class SelfTrainer : IDisposable
 
         var nextFeatures = nextState.ToFeatureVector();
 
-        // Create experience
+        // METABOLIZE: Process experience through valence system
+        // This converts raw experience into valence-tagged learning signals
+        var metabolized = _valenceMetabolizer.Metabolize(
+            _lastState, _lastAction, reward, nextFeatures, done);
+
+        // Log lessons learned from metabolization
+        if (metabolized.LessonLearned != null && _session.TotalTimesteps % 100 == 0)
+        {
+            _logger?.LogDebug("Metabolized lesson: {Lesson} (valence={Valence})",
+                metabolized.LessonLearned, metabolized.AssignedValence);
+        }
+
+        // Apply valence-based reward shaping
+        // Positive valence experiences get a small bonus when outcome is good
+        // Negative valence experiences get bonus for successfully avoiding harm
+        float shapedReward = reward;
+        if (metabolized.AssignedValence == Valence.Positive && reward > 0)
+        {
+            shapedReward *= 1.1f; // Reward success in positive mode
+        }
+        else if (metabolized.AssignedValence == Valence.Negative && reward >= 0)
+        {
+            shapedReward += 0.05f; // Small bonus for surviving in defensive mode
+        }
+        else if (metabolized.AssignedValence == Valence.Neutral)
+        {
+            // Neutral mode: encourage exploration but don't amplify rewards
+            shapedReward *= 0.95f; // Slight penalty to encourage commitment to pos/neg
+        }
+
+        // Check for valence recalibration trigger
+        // If in neutral too long or experiencing rapid valence swings, force recalibration
+        var valenceState = _valenceAuthorizer.CurrentState;
+        if (valenceState.IsRecalibrating && valenceState.Duration > 30)
+        {
+            // Been in neutral too long - need to pick a direction
+            var recommended = _valenceMetabolizer.GetRecommendedValence(nextFeatures);
+            if (recommended != Valence.Neutral)
+            {
+                float recalSignal = recommended == Valence.Positive ? 0.5f : -0.5f;
+                _valenceAuthorizer.RequestTransition(recommended, recalSignal, 0.6f);
+                _logger?.LogDebug("Recalibration complete: transitioning to {Valence}", recommended);
+            }
+        }
+
+        // Create experience with shaped reward
         var experience = new Experience
         {
             State = _lastState,
             Action = _lastAction,
-            Reward = reward,
+            Reward = shapedReward,
             NextState = nextFeatures,
             Done = done,
             LogProbability = _lastLogProb,
@@ -230,7 +388,15 @@ public sealed class SelfTrainer : IDisposable
 
         // GAIN: Feed observation to knowledge organizer
         // This enables the LOOP: observe → discover patterns → organize → apply
-        _knowledge?.Observe(_lastState, _lastAction, reward, nextFeatures, done);
+        // Include valence context in the observation
+        var context = new Dictionary<string, float>
+        {
+            ["valence"] = (float)valenceState.Direction,
+            ["valence_magnitude"] = valenceState.Magnitude,
+            ["valence_confidence"] = valenceState.Confidence,
+            ["metabolized_contribution"] = metabolized.ValenceContribution
+        };
+        _knowledge?.Observe(_lastState, _lastAction, reward, nextFeatures, done, context);
 
         _episodeReward += reward;
         _episodeLength++;
@@ -491,6 +657,7 @@ public sealed class SelfTrainer : IDisposable
     public string GetDiagnostics()
     {
         var knowledgeInfo = _knowledge?.GetDiagnostics() ?? "Knowledge: disabled";
+        var valenceState = _valenceAuthorizer.CurrentState;
 
         return $"""
             === SELF-TRAINER ===
@@ -502,6 +669,17 @@ public sealed class SelfTrainer : IDisposable
             Mean Length (100 ep): {MeanRecentLength:F1}
             Exploration Bonus: {GetExplorationBonus():F3}
             Collecting: {_isCollecting}
+
+            === VALENCE SYSTEM ===
+            Current: {valenceState.Direction} (mag={valenceState.Magnitude:F2})
+            Confidence: {valenceState.Confidence:F2}
+            Duration: {valenceState.Duration} frames
+            Net Signal: {valenceState.NetSignal:F2}
+            Recalibrating: {valenceState.IsRecalibrating}
+            Stable: {valenceState.IsStable}
+
+            {_valenceAuthorizer.GetDiagnostics()}
+            {_valenceMetabolizer.GetDiagnostics()}
 
             === KNOWLEDGE CYCLE ===
             GAIN:     {_knowledge?.TotalObservations ?? 0:N0} observations
