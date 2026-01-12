@@ -53,7 +53,7 @@ public sealed class ReferenceBuilder
             if (state.Detections.PrimaryThreat != null)
             {
                 detectionRef.AddTag("HasPrimaryTarget");
-                detectionRef.SetMetric("primary_distance", state.Detections.PrimaryThreat.Distance);
+                detectionRef.SetMetric("primary_distance", state.Detections.PrimaryThreat.EstimatedDistance ?? 0f);
             }
             if (state.Detections.ThreatCount > 2)
                 detectionRef.AddTag("MultipleThreat");

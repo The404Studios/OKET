@@ -343,7 +343,7 @@ public sealed class CognitiveController
     /// <summary>
     /// Determine bind state based on cognitive signals.
     /// </summary>
-    private BindState DetermineBindState(
+    private static BindState DetermineBindState(
         BeliefState belief,
         InteroceptiveState feeling,
         CommittedState? commitment)
@@ -366,7 +366,7 @@ public sealed class CognitiveController
         return BindState.Separate;
     }
 
-    private BeliefState ModulateBelief(BeliefState belief, InteroceptiveState feeling)
+    private static BeliefState ModulateBelief(BeliefState belief, InteroceptiveState feeling)
     {
         // PerceptionTrust control knob: scales confidence requirements
         float trustModifier = feeling.PerceptionTrust;

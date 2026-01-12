@@ -233,7 +233,7 @@ public sealed class GateController
     /// <summary>
     /// Get the fallback gate when a gate is denied.
     /// </summary>
-    private GateType GetFallbackGate(GateType denied)
+    private static GateType GetFallbackGate(GateType denied)
     {
         return denied switch
         {

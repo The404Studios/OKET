@@ -23,7 +23,7 @@ public abstract class SkillBase : ISkill
     /// <summary>
     /// Create an action plan with the given actions.
     /// </summary>
-    protected ActionPlan CreatePlan(GameState state, StrategicMode mode, string reason, params GameAction[] actions)
+    protected static ActionPlan CreatePlan(GameState state, StrategicMode mode, string reason, params GameAction[] actions)
     {
         return new ActionPlan
         {

@@ -4,7 +4,7 @@ namespace OKET.Core.Cognition;
 /// Fused belief state from all sensory modalities.
 /// This is the "single truth" the policy operates on.
 /// </summary>
-public sealed class BeliefState
+public sealed record BeliefState
 {
     /// <summary>Frame ID this belief corresponds to.</summary>
     public long FrameId { get; init; }

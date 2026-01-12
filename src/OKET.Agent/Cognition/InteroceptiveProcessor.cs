@@ -206,8 +206,8 @@ public sealed class InteroceptiveProcessor
         var entries = _history.ToList();
         int midpoint = entries.Count / 2;
 
-        float recentHealth = entries.Skip(midpoint).Average(h => h.Health);
-        float olderHealth = entries.Take(midpoint).Average(h => h.Health);
+        float recentHealth = (float)entries.Skip(midpoint).Average(h => h.Health);
+        float olderHealth = (float)entries.Take(midpoint).Average(h => h.Health);
 
         float healthTrend = (recentHealth - olderHealth) / 50f;
 

@@ -41,7 +41,7 @@ public sealed class BindingValidator
     /// LAW 1: BINDING
     /// State topology must permit the gate type.
     /// </summary>
-    private ValidationResult ValidateBinding(GateType gate, GateContext context)
+    private static ValidationResult ValidateBinding(GateType gate, GateContext context)
     {
         return gate switch
         {
@@ -82,7 +82,7 @@ public sealed class BindingValidator
     /// Operation must not violate directional constraints.
     /// CENTER permission is the primary directional gate.
     /// </summary>
-    private ValidationResult ValidateDirection(GateType gate, GateContext context)
+    private static ValidationResult ValidateDirection(GateType gate, GateContext context)
     {
         return gate switch
         {
@@ -130,7 +130,7 @@ public sealed class BindingValidator
     /// LAW 3: CONVERSATION (NAND / Inhibition)
     /// Certain gate combinations must be prevented.
     /// </summary>
-    private ValidationResult ValidateConversation(GateType gate, GateContext context)
+    private static ValidationResult ValidateConversation(GateType gate, GateContext context)
     {
         // If inhibited, only Yield and Block are allowed
         if (context.Inhibited)

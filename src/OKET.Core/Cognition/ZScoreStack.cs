@@ -57,7 +57,7 @@ public sealed class ZScoreStack
         SystemStrain = CalculateSystemStrain();
     }
 
-    private SensoryZScores UpdateSensoryZScores(ZScoreInputs inputs)
+    private static SensoryZScores UpdateSensoryZScores(ZScoreInputs inputs)
     {
         return new SensoryZScores
         {
@@ -72,7 +72,7 @@ public sealed class ZScoreStack
         };
     }
 
-    private float UpdatePerceptualAgreement(ZScoreInputs inputs, SensoryZScores z0)
+    private static float UpdatePerceptualAgreement(ZScoreInputs inputs, SensoryZScores z0)
     {
         // Measure agreement between vision and audio
 
@@ -98,7 +98,7 @@ public sealed class ZScoreStack
         return (agreement - inputs.PerceptualAgreementBaseline) / Math.Max(inputs.PerceptualAgreementStdDev, 0.1f);
     }
 
-    private float UpdateBeliefStability(ZScoreInputs inputs)
+    private static float UpdateBeliefStability(ZScoreInputs inputs)
     {
         // How much are beliefs changing?
         float beliefFlips = inputs.BeliefStats.ModeChangesPerSecond;
@@ -111,7 +111,7 @@ public sealed class ZScoreStack
         return (volatility - inputs.BeliefVolatilityBaseline) / Math.Max(inputs.BeliefVolatilityStdDev, 0.1f);
     }
 
-    private float UpdateControlEfficacy(ZScoreInputs inputs)
+    private static float UpdateControlEfficacy(ZScoreInputs inputs)
     {
         // Are actions producing expected outcomes?
         float expectedHits = inputs.ControlStats.ShotsFired * inputs.ControlStats.ExpectedAccuracy;

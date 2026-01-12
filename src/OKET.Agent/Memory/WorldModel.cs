@@ -103,7 +103,7 @@ public sealed class WorldModel : IWorldModel
         return bestMatch;
     }
 
-    private void UpdateTrack(TrackedTarget target, Detection detection)
+    private static void UpdateTrack(TrackedTarget target, Detection detection)
     {
         // Calculate velocity using exponential moving average
         float dt = Math.Max(target.FramesSinceLastSeen * 33.33f, 1f);

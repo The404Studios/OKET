@@ -143,7 +143,7 @@ public sealed class PPOTrainer : IDisposable
                 totalLoss.backward();
 
                 // Gradient clipping
-                utils.clip_grad_norm_(_policy.parameters(), _config.MaxGradNorm);
+                nn.utils.clip_grad_norm_(_policy.parameters(), _config.MaxGradNorm);
 
                 // Optimizer step
                 _optimizer.step();
