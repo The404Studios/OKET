@@ -336,6 +336,13 @@ public sealed class CognitiveController
         // === STAGE 9: ACTION MODULATION ===
         plan = ModulateActionPlan(plan, _currentFeeling);
 
+        // === STAGE 10: GATE FEEDBACK - BACKPROPAGATION ===
+        // Record cycle outcome for gate feedback system
+        // This closes the loop: gates -> action -> outcome -> backprop -> gates
+        float survivalScore = survived ? 1f : 0f;
+        float progressScore = outcomeDelta;
+        _gateController.RecordCycleOutcome(survivalScore, progressScore, strainDelta);
+
         _lastPlan = plan;
         return plan;
     }
@@ -444,6 +451,7 @@ public sealed class CognitiveController
     public void Reset()
     {
         _beliefLock.Reset();
+        _gateController.ResetFeedback();
         _rawBelief = null;
         _committedBelief = null;
         _currentFeeling = null;
@@ -470,6 +478,7 @@ public sealed class CognitiveController
         var refInfo = _refBuilder.GetDiagnostics();
         var centerInfo = _integrationBridge.GetDiagnostics();
         var gateInfo = _gateController.GetDiagnostics();
+        var feedbackInfo = _gateController.Feedback.GetDiagnostics();
 
         return $"""
             === COGNITIVE STATE ===
@@ -479,12 +488,14 @@ public sealed class CognitiveController
             GateContext: {_currentGateContext}
             GapPressure: {ExpectationGapPressure:F2}
             Modulation: perception={PerceptionModulation:F2}, prediction={PredictionModulation:F2}
+            SystemGain: {_gateController.SystemGain:F2} (stable={_gateController.IsStable})
             {feelingInfo}
             {zInfo}
             {cueInfo}
             {refInfo}
             {centerInfo}
             {gateInfo}
+            {feedbackInfo}
             =======================
             """;
     }

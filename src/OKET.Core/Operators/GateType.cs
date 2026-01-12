@@ -70,7 +70,7 @@ public enum GateType
 /// 3. Conversation law permits (NAND not triggered)
 /// 4. CENTER permits (frame coherence sufficient)
 /// </summary>
-public readonly struct GateContext
+public readonly record struct GateContext
 {
     /// <summary>
     /// Current binding state of the information.
