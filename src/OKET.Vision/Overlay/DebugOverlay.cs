@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
+using OKET.Core.Detection;
 using OKET.Core.Navigation;
 using OKET.Core.Types;
 
@@ -23,6 +24,7 @@ public sealed class DebugOverlay : IDisposable
     private readonly List<NavMeshVisualization> _navMeshes = new();
     private readonly List<MarkerVisualization> _markers = new();
     private readonly List<TextVisualization> _texts = new();
+    private readonly List<DetectionVisualization> _detections = new();
 
     // Colors
     private static readonly Color PathColor = Color.FromArgb(180, 0, 150, 255); // Blue
@@ -32,6 +34,12 @@ public sealed class DebugOverlay : IDisposable
     private static readonly Color PlayerColor = Color.FromArgb(200, 0, 255, 255); // Cyan
     private static readonly Color HallwayColor = Color.FromArgb(100, 255, 165, 0); // Orange
     private static readonly Color CoverColor = Color.FromArgb(100, 128, 0, 128); // Purple
+
+    // Detection colors by class
+    private static readonly Color ThreatColor = Color.FromArgb(220, 255, 50, 50); // Red
+    private static readonly Color ItemColor = Color.FromArgb(220, 50, 255, 50); // Green
+    private static readonly Color SurvivorColor = Color.FromArgb(220, 50, 150, 255); // Blue
+    private static readonly Color UnknownColor = Color.FromArgb(180, 200, 200, 200); // Gray
 
     public bool IsEnabled
     {
@@ -141,6 +149,57 @@ public sealed class DebugOverlay : IDisposable
     }
 
     /// <summary>
+    /// Update detections from game state. Call this every frame.
+    /// </summary>
+    public void UpdateDetections(IEnumerable<Detection> detections)
+    {
+        _detections.Clear();
+
+        foreach (var det in detections)
+        {
+            var className = det.Class.ToString();
+            _detections.Add(new DetectionVisualization
+            {
+                TrackId = det.TrackId,
+                ClassName = className,
+                Confidence = det.Confidence,
+                Box = det.Box,
+                Velocity = det.Velocity ?? default,
+                Priority = det.Priority,
+                IsThreat = det.IsThreat,
+                Color = GetDetectionColor(className)
+            });
+        }
+    }
+
+    /// <summary>
+    /// Update detections from a DetectionResult.
+    /// </summary>
+    public void UpdateDetections(DetectionResult detectionResult)
+    {
+        UpdateDetections(detectionResult.All);
+    }
+
+    /// <summary>
+    /// Add a single detection.
+    /// </summary>
+    public void AddDetection(Detection detection)
+    {
+        var className = detection.Class.ToString();
+        _detections.Add(new DetectionVisualization
+        {
+            TrackId = detection.TrackId,
+            ClassName = className,
+            Confidence = detection.Confidence,
+            Box = detection.Box,
+            Velocity = detection.Velocity ?? default,
+            Priority = detection.Priority,
+            IsThreat = detection.IsThreat,
+            Color = GetDetectionColor(className)
+        });
+    }
+
+    /// <summary>
     /// Render the overlay to a bitmap.
     /// </summary>
     public Bitmap Render()
@@ -188,6 +247,12 @@ public sealed class DebugOverlay : IDisposable
                 continue;
             }
             DrawText(graphics, text);
+        }
+
+        // Draw detections (moving objects)
+        foreach (var detection in _detections)
+        {
+            DrawDetection(graphics, detection);
         }
 
         return bitmap;
@@ -350,6 +415,117 @@ public sealed class DebugOverlay : IDisposable
         };
     }
 
+    private static Color GetDetectionColor(string detectionClass)
+    {
+        var lowerClass = detectionClass.ToLowerInvariant();
+
+        // Threats (zombies, enemies, etc.)
+        if (lowerClass.Contains("zombie") || lowerClass.Contains("enemy") ||
+            lowerClass.Contains("threat") || lowerClass.Contains("hostile"))
+        {
+            return ThreatColor;
+        }
+
+        // Items (loot, weapons, supplies)
+        if (lowerClass.Contains("item") || lowerClass.Contains("loot") ||
+            lowerClass.Contains("weapon") || lowerClass.Contains("supply") ||
+            lowerClass.Contains("ammo") || lowerClass.Contains("health"))
+        {
+            return ItemColor;
+        }
+
+        // Survivors/players
+        if (lowerClass.Contains("survivor") || lowerClass.Contains("player") ||
+            lowerClass.Contains("teammate") || lowerClass.Contains("ally"))
+        {
+            return SurvivorColor;
+        }
+
+        return UnknownColor;
+    }
+
+    private void DrawDetection(Graphics g, DetectionVisualization detection)
+    {
+        var box = detection.Box;
+
+        // Draw bounding box
+        using var pen = new Pen(detection.Color, 2f);
+        g.DrawRectangle(pen, box.X, box.Y, box.Width, box.Height);
+
+        // Draw corner accents for better visibility
+        float cornerSize = Math.Min(box.Width, box.Height) * 0.2f;
+        using var accentPen = new Pen(detection.Color, 3f);
+
+        // Top-left corner
+        g.DrawLine(accentPen, box.X, box.Y, box.X + cornerSize, box.Y);
+        g.DrawLine(accentPen, box.X, box.Y, box.X, box.Y + cornerSize);
+
+        // Top-right corner
+        g.DrawLine(accentPen, box.X + box.Width, box.Y, box.X + box.Width - cornerSize, box.Y);
+        g.DrawLine(accentPen, box.X + box.Width, box.Y, box.X + box.Width, box.Y + cornerSize);
+
+        // Bottom-left corner
+        g.DrawLine(accentPen, box.X, box.Y + box.Height, box.X + cornerSize, box.Y + box.Height);
+        g.DrawLine(accentPen, box.X, box.Y + box.Height, box.X, box.Y + box.Height - cornerSize);
+
+        // Bottom-right corner
+        g.DrawLine(accentPen, box.X + box.Width, box.Y + box.Height, box.X + box.Width - cornerSize, box.Y + box.Height);
+        g.DrawLine(accentPen, box.X + box.Width, box.Y + box.Height, box.X + box.Width, box.Y + box.Height - cornerSize);
+
+        // Draw label background
+        string label = $"{detection.ClassName} ({detection.Confidence:P0})";
+        if (detection.TrackId > 0)
+        {
+            label = $"[{detection.TrackId}] {label}";
+        }
+
+        using var font = new Font("Arial", 10, FontStyle.Bold);
+        var labelSize = g.MeasureString(label, font);
+
+        float labelX = box.X;
+        float labelY = box.Y - labelSize.Height - 2;
+        if (labelY < 0) labelY = box.Y + box.Height + 2; // Put below if no room above
+
+        // Draw label background
+        using var bgBrush = new SolidBrush(Color.FromArgb(180, 0, 0, 0));
+        g.FillRectangle(bgBrush, labelX, labelY, labelSize.Width + 4, labelSize.Height);
+
+        // Draw label text
+        using var textBrush = new SolidBrush(detection.Color);
+        g.DrawString(label, font, textBrush, labelX + 2, labelY);
+
+        // Draw velocity arrow if moving
+        if (detection.Velocity.X != 0 || detection.Velocity.Y != 0)
+        {
+            var centerX = box.X + box.Width / 2;
+            var centerY = box.Y + box.Height / 2;
+
+            // Scale velocity for visualization
+            float velocityScale = 20f;
+            var endX = centerX + detection.Velocity.X * velocityScale;
+            var endY = centerY + detection.Velocity.Y * velocityScale;
+
+            using var velocityPen = new Pen(Color.FromArgb(200, 255, 255, 255), 2f);
+            velocityPen.EndCap = System.Drawing.Drawing2D.LineCap.ArrowAnchor;
+            g.DrawLine(velocityPen, centerX, centerY, endX, endY);
+        }
+
+        // Draw threat indicator
+        if (detection.IsThreat)
+        {
+            using var threatBrush = new SolidBrush(Color.FromArgb(150, 255, 0, 0));
+            float indicatorSize = 8;
+            g.FillEllipse(threatBrush, box.X - indicatorSize - 2, box.Y, indicatorSize, indicatorSize);
+        }
+
+        // Draw priority indicator
+        if (detection.Priority > 0.7f)
+        {
+            using var priorityPen = new Pen(Color.FromArgb(200, 255, 215, 0), 2f); // Gold
+            g.DrawRectangle(priorityPen, box.X - 2, box.Y - 2, box.Width + 4, box.Height + 4);
+        }
+    }
+
     private static float GetMarkerSize(MarkerType type)
     {
         return type switch
@@ -370,6 +546,7 @@ public sealed class DebugOverlay : IDisposable
         _navMeshes.Clear();
         _markers.Clear();
         _texts.Clear();
+        _detections.Clear();
     }
 
     public void Dispose()
@@ -428,4 +605,16 @@ internal class TextVisualization
     public Color Color { get; init; }
     public DateTime CreatedAt { get; init; }
     public TimeSpan Duration { get; init; }
+}
+
+internal class DetectionVisualization
+{
+    public int TrackId { get; init; }
+    public string ClassName { get; init; } = "";
+    public float Confidence { get; init; }
+    public BoundingBox Box { get; init; }
+    public Vector2 Velocity { get; init; }
+    public float Priority { get; init; }
+    public bool IsThreat { get; init; }
+    public Color Color { get; init; }
 }
