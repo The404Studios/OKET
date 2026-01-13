@@ -288,7 +288,7 @@ public sealed class DebugOverlay : IDisposable
 
         var lines = new List<(string text, Color color)>
         {
-            ($"OKET Agent v0.1", Color.Cyan),
+            ($"OKET AGI v0.1", Color.Cyan),
             ($"─────────────────────────", Color.Gray),
             ($"Intent: {_debugState.IntentType}", GetIntentColor(_debugState.IntentType)),
             ($"  └─ {_debugState.IntentReason}", Color.LightGray),

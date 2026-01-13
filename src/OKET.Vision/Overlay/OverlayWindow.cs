@@ -73,7 +73,7 @@ public sealed class OverlayWindow : IDisposable
         _overlayHandle = CreateWindowEx(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             "OKETOverlay",
-            "OKET Debug Overlay",
+            "OKET AGI",
             WS_POPUP,
             x, y, _width, _height,
             IntPtr.Zero,
