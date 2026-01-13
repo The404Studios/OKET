@@ -69,6 +69,16 @@ public sealed class Frame : IDisposable
         return new Frame(Id, Timestamp, width, height, croppedData);
     }
 
+    /// <summary>
+    /// Create a deep copy of this frame.
+    /// </summary>
+    public Frame Clone()
+    {
+        var clonedData = new byte[Data.Length];
+        Array.Copy(Data, clonedData, Data.Length);
+        return new Frame(Id, Timestamp, Width, Height, clonedData);
+    }
+
     public void Dispose()
     {
         // Data is managed, no explicit disposal needed

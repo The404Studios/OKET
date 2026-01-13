@@ -119,8 +119,8 @@ public sealed class MotionDetector : IObjectDetector
         Array.Clear(_motionBuffer);
 
         int stride = current.Width;
-        var currentData = current.RawData;
-        var prevData = previous.RawData;
+        var currentData = current.Data;
+        var prevData = previous.Data;
 
         // Process in parallel for speed
         Parallel.For(0, current.Height, y =>
