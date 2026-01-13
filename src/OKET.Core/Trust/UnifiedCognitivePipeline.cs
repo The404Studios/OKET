@@ -170,7 +170,7 @@ public sealed class UnifiedCognitivePipeline
             ThreatCount = gameState.Detections.ThreatCount,
             OpportunityCount = gradientResult.TrustedDetections.Count(d => d.OpportunityScore > 0.3f),
             Health = gameState.Hud.Health / 100f,
-            Ammo = gameState.Hud.Ammo / 100f,
+            Ammo = gameState.Hud.AmmoClip / 100f,
             HealthChange = ComputeHealthChange(gameState),
             SystemStrain = _systemStrain,
             ConflictingSignals = gradientResult.TrustedDetections.Count(d => !d.IsAuthorized) / Math.Max(1f, gradientResult.TrustedDetections.Count),
