@@ -501,6 +501,22 @@ public sealed class ThinkingPipeline
         _certified.RemoveAll(t => t.FramesSinceCertified > 90); // ~3 seconds
     }
 
+    /// <summary>
+    /// Validate a specific prediction by ID.
+    /// </summary>
+    public bool ValidatePrediction(int predictionId, bool isCorrect)
+    {
+        if (!_predictions.TryGetValue(predictionId, out var prediction))
+            return false;
+
+        prediction.Validated = true;
+        prediction.Correct = isCorrect;
+        _predictionsValidated++;
+        if (isCorrect) _predictionsCorrect++;
+
+        return true;
+    }
+
     public string GetDiagnostics()
     {
         return $"""
@@ -605,6 +621,9 @@ public sealed class CertifiedThought
     public List<string> CertificationChain { get; init; } = new();
     public DateTime CertifiedAt { get; init; }
     public int FramesSinceCertified { get; set; }
+
+    /// <summary>Prediction ID for validation tracking.</summary>
+    public int? PredictionId { get; init; }
 }
 
 /// <summary>

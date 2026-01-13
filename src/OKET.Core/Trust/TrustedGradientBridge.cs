@@ -292,18 +292,18 @@ public sealed class TrustedGradientBridge
 
                 thought.ApplyLearning(
                     encounterCount: 10, // Strong prototype signal
-                    engageSuccess: engageSuccess,
-                    ignoreSuccess: 1f - engageSuccess,
-                    confidence: trustWeight);
+                    engageSuccessRate: engageSuccess,
+                    ignoreSuccessRate: 1f - engageSuccess,
+                    predictionConfidence: trustWeight);
             }
             else
             {
                 // Novel object - probe carefully
                 thought.ApplyLearning(
                     encounterCount: 1, // Weak signal
-                    engageSuccess: 0.5f, // Uncertain
-                    ignoreSuccess: 0.5f, // Uncertain
-                    confidence: trustWeight * 0.5f);
+                    engageSuccessRate: 0.5f, // Uncertain
+                    ignoreSuccessRate: 0.5f, // Uncertain
+                    predictionConfidence: trustWeight * 0.5f);
             }
         }
     }

@@ -134,7 +134,7 @@ public sealed class CognitiveController
         // === STAGE 1.25: OBJECT-THOUGHT BINDING ===
         // PRINCIPLE: Every detected object MUST have a thought
         // Process all detections into thoughts before fusion
-        _thoughtManager.ProcessDetections(gameState.Detections, gameState.Frame);
+        _thoughtManager.ProcessDetections(gameState.Detections, gameState.FrameId);
 
         // === STAGE 1.5: REFERENCE MEMORY - PERCEPTION ===
         // Build references from what "thinking heard and saw"

@@ -260,8 +260,8 @@ public sealed class CognitiveTrustOrchestrator
             var claim = new KnowledgeClaim
             {
                 Type = KnowledgeType.Associative,
-                Content = $"In {input.SituationTag}, action {_currentDecision.Type} succeeded",
-                Tags = new List<string> { input.SituationTag, _currentDecision.Type.ToString() },
+                Content = $"In {input.SituationTag}, action {_currentDecision.Value.Type} succeeded",
+                Tags = new List<string> { input.SituationTag, _currentDecision.Value.Type.ToString() },
                 Context = new KnowledgeContext
                 {
                     ThreatLevel = input.ThreatLevel,
