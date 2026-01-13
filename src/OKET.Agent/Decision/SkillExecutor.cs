@@ -15,14 +15,23 @@ public sealed class SkillExecutor
     private ISkill? _activeSkill;
     private StrategicMode _lastMode = StrategicMode.Idle;
 
+    // Navigation skill reference for external access
+    private readonly NavigationSkill _navigationSkill;
+
+    public NavigationSkill NavigationSkill => _navigationSkill;
+
     public SkillExecutor()
     {
+        // Create navigation skill
+        _navigationSkill = new NavigationSkill();
+
         // Register skills
         RegisterSkill(new FightSkill());
         RegisterSkill(new KiteSkill());
         RegisterSkill(new ReloadSkill());
         RegisterSkill(new UnstickSkill());
         RegisterSkill(new AimSkill());
+        RegisterSkill(_navigationSkill);
     }
 
     private void RegisterSkill(ISkill skill)
