@@ -28,4 +28,8 @@ public sealed class DetectionResult
 
     /// <summary>Total number of threats detected.</summary>
     public int ThreatCount => Detections.Count(d => d.IsThreat);
+
+    /// <summary>Get all item detections (interactable objects).</summary>
+    public IEnumerable<Detection> Items =>
+        Detections.Where(d => d.IsInteractable);
 }

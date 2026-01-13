@@ -173,10 +173,10 @@ public sealed class OverlayWindow : IDisposable
 
     private void UpdateLayeredWindow()
     {
-        Bitmap? frame;
+        Bitmap frame;
         lock (_frameLock)
         {
-            if (_currentFrame == null)
+            if (_currentFrame is null)
                 return;
             frame = (Bitmap)_currentFrame.Clone();
         }

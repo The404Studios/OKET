@@ -161,7 +161,7 @@ public sealed class NavigationSkill : SkillBase
     {
         // Try to use player position if available
         // Otherwise use screen center as reference
-        return new Vector2(state.ScreenWidth / 2f, state.ScreenHeight / 2f);
+        return new Vector2(state.ScreenSize.X / 2f, state.ScreenSize.Y / 2f);
     }
 
     /// <summary>
@@ -170,7 +170,7 @@ public sealed class NavigationSkill : SkillBase
     private static Vector2? FindPlayer(GameState state, int playerId)
     {
         // Look for player in detections
-        var playerDetection = state.Detections.All
+        var playerDetection = state.Detections.Detections
             .FirstOrDefault(d => d.TrackId == playerId);
 
         if (playerDetection != null)

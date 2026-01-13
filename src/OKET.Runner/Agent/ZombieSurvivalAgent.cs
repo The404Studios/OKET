@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using OKET.Core.Types;
 using OKET.Core.State;
@@ -11,6 +12,7 @@ using OKET.Agent.Safety;
 using OKET.Vision.Hud;
 using OKET.Vision.Detection;
 using OKET.Vision.Capture;
+using OKET.Vision.Overlay;
 using OKET.Input;
 using OKET.Runner.Logging;
 
@@ -44,6 +46,10 @@ public sealed class ZombieSurvivalAgent : IDisposable
     // Logging
     private readonly EpisodeLogger _episodeLogger;
     private readonly PerformanceMonitor _perfMonitor;
+
+    // Overlay
+    private OverlayWindow? _overlayWindow;
+    private readonly bool _enableOverlay;
 
     // State
     private GameState? _lastState;
@@ -82,6 +88,7 @@ public sealed class ZombieSurvivalAgent : IDisposable
 
         _episodeLogger = new EpisodeLogger(config.LogDirectory);
         _perfMonitor = new PerformanceMonitor();
+        _enableOverlay = config.EnableOverlay;
     }
 
     /// <summary>
@@ -118,6 +125,24 @@ public sealed class ZombieSurvivalAgent : IDisposable
         _isRunning = true;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
+        // Initialize overlay if enabled
+        if (_enableOverlay)
+        {
+            var targetWindow = FindGameWindow();
+            if (targetWindow != IntPtr.Zero)
+            {
+                _overlayWindow = new OverlayWindow(targetWindow,
+                    _frameSource.Resolution.Width,
+                    _frameSource.Resolution.Height);
+                _overlayWindow.Show();
+                _logger.LogInformation("Debug overlay initialized");
+            }
+            else
+            {
+                _logger.LogWarning("Could not find game window for overlay");
+            }
+        }
+
         _logger.LogInformation("Agent started successfully");
 
         // Run main loop
@@ -147,6 +172,10 @@ public sealed class ZombieSurvivalAgent : IDisposable
         {
             _episodeLogger.EndEpisode();
         }
+
+        // Dispose overlay
+        _overlayWindow?.Dispose();
+        _overlayWindow = null;
 
         _perfMonitor.Stop();
 
@@ -231,7 +260,26 @@ public sealed class ZombieSurvivalAgent : IDisposable
         var actuationTime = sw.ElapsedMilliseconds;
         _perfMonitor.RecordActuationTime(actuationTime);
 
-        // 7. Logging
+        // 7. Update Overlay
+        if (_overlayWindow != null)
+        {
+            var debugOverlay = _overlayWindow.DebugOverlay;
+
+            // Update detections visualization
+            debugOverlay.UpdateDetections(state.Detections);
+
+            // Update navigation path visualization
+            var navState = _skillExecutor.NavigationSkill.GetNavigationState();
+            if (navState.HasPath && navState.CurrentPath != null)
+            {
+                debugOverlay.SetCurrentPath(navState.CurrentPath, navState.CurrentPathIndex);
+            }
+
+            // Update overlay position to track game window
+            _overlayWindow.UpdatePosition();
+        }
+
+        // 8. Logging
         if (_config.EnableLogging)
         {
             var outcome = CalculateOutcome(state);
@@ -303,11 +351,42 @@ public sealed class ZombieSurvivalAgent : IDisposable
     public void Dispose()
     {
         StopAsync().Wait();
+        _overlayWindow?.Dispose();
         _frameSource.Dispose();
         _detector.Dispose();
         _inputController.Dispose();
         _episodeLogger.Dispose();
     }
+
+    /// <summary>
+    /// Find the game window handle.
+    /// </summary>
+    private static IntPtr FindGameWindow()
+    {
+        // Try common game window names
+        string[] windowNames = { "Garry's Mod", "GMod", "hl2", "Source Engine" };
+
+        foreach (var name in windowNames)
+        {
+            var hwnd = FindWindow(null, name);
+            if (hwnd != IntPtr.Zero)
+                return hwnd;
+        }
+
+        // Fallback: Find by class name
+        var gmodHwnd = FindWindow("Valve001", null);
+        if (gmodHwnd != IntPtr.Zero)
+            return gmodHwnd;
+
+        // Try to find the foreground window as last resort
+        return GetForegroundWindow();
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 }
 
 /// <summary>
@@ -320,6 +399,7 @@ public sealed record AgentConfig
     public string? DetectorModelPath { get; init; }
     public bool EnableInput { get; init; } = true;
     public bool EnableLogging { get; init; } = true;
+    public bool EnableOverlay { get; init; } = true;
     public string LogDirectory { get; init; } = "logs";
     public int TargetFps { get; init; } = 30;
 }
