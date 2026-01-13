@@ -502,11 +502,12 @@ public sealed class ThinkingPipeline
     }
 
     /// <summary>
-    /// Validate a specific prediction by ID.
+    /// Validate a specific prediction by thought ID.
     /// </summary>
-    public bool ValidatePrediction(int predictionId, bool isCorrect)
+    public bool ValidatePrediction(int thoughtId, bool isCorrect)
     {
-        if (!_predictions.TryGetValue(predictionId, out var prediction))
+        var prediction = _predictions.FirstOrDefault(p => p.ThoughtId == thoughtId && !p.Validated);
+        if (prediction == null)
             return false;
 
         prediction.Validated = true;
