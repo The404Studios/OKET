@@ -17,6 +17,12 @@ public sealed class HudState
     /// <summary>Total reserve ammo.</summary>
     public int AmmoReserve { get; init; }
 
+    /// <summary>Current ammo (alias for AmmoClip for compatibility).</summary>
+    public int Ammo => AmmoClip;
+
+    /// <summary>Maximum ammo capacity (estimated from clip + reserve or default).</summary>
+    public int MaxAmmo { get; init; } = 30;
+
     /// <summary>Current wave number.</summary>
     public int Wave { get; init; }
 

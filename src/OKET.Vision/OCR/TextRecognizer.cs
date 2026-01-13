@@ -285,7 +285,7 @@ internal static class PixConverter
     public static Pix ToPix(Bitmap bitmap)
     {
         using var stream = new MemoryStream();
-        bitmap.Save(stream, ImageFormat.Png);
+        bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
         stream.Position = 0;
         return Pix.LoadFromMemory(stream.ToArray());
     }
