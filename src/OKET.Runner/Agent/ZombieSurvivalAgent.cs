@@ -75,7 +75,7 @@ public sealed class ZombieSurvivalAgent : IDisposable
         _hudParser = new ZombieHudParser();
         _detector = config.UseNeuralDetector && !string.IsNullOrEmpty(config.DetectorModelPath)
             ? new OnnxObjectDetector()
-            : new SimpleZombieDetector();
+            : new MotionDetector(); // Use motion detection to track any moving objects
 
         _policy = new RuleBasedPolicy();
         _skillExecutor = new SkillExecutor();
@@ -272,8 +272,34 @@ public sealed class ZombieSurvivalAgent : IDisposable
         {
             var debugOverlay = _overlayWindow.DebugOverlay;
 
-            // Update detections visualization
+            // Update detections visualization - pass all detections
             debugOverlay.UpdateDetections(state.Detections);
+
+            // Update debug state for panel display
+            var outcome = CalculateOutcome(state);
+            var debugState = new DebugState
+            {
+                IntentType = mode.ToString(),
+                IntentReason = state.ThreatsInFov > 0
+                    ? $"{state.ThreatsInFov} threats, {state.NearestThreatDistance:F0}px away"
+                    : "No threats detected",
+                Confidence = confidence,
+                ActiveSkill = plan?.GetType().Name ?? "None",
+                ChosenAction = plan?.ToString()?.Split('.').LastOrDefault() ?? "Idle",
+                PredictionError = 0f,
+                LastReward = outcome.Reward,
+                ThreatCount = state.ThreatsInFov,
+                Health = state.Hud.Health,
+                Fps = _perfMonitor.CurrentFps
+            };
+            debugOverlay.UpdateDebugState(debugState);
+
+            // Add markers for primary target
+            if (state.Detections.PrimaryThreat != null)
+            {
+                var threat = state.Detections.PrimaryThreat;
+                debugOverlay.AddMarker(threat.Box.Center, MarkerType.Target, "TARGET", 0.1f);
+            }
 
             // Update navigation path visualization
             var navState = _skillExecutor.NavigationSkill.GetNavigationState();
