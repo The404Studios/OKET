@@ -173,7 +173,7 @@ public sealed class TrustedGradientSystem
             // Find best token to act on
             var bestToken = _currentTokens
                 .Where(t => t.IsAuthorized)
-                .OrderByDescending(t => t.TrustLevel * (t.GradientObject.ThreatLevel + 0.1f))
+                .OrderByDescending(t => t.TrustLevel * (t.GradientObject.ThreatLevel() + 0.1f))
                 .FirstOrDefault();
 
             if (bestToken != null)
@@ -388,11 +388,11 @@ public sealed class TrustedGradientSystem
         superstate.Signature = new SuperstateSignature
         {
             NodeCount = tokens.Count,
-            ThreatLikeCount = tokens.Count(t => t.GradientObject.ThreatLevel > 0.5f),
+            ThreatLikeCount = tokens.Count(t => t.GradientObject.ThreatLevel() > 0.5f),
             MovingCount = tokens.Count(t => t.GradientObject.Speed > 0.05f),
             StaticCount = tokens.Count(t => t.GradientObject.Speed <= 0.05f),
             Urgency = threatLevel,
-            Opportunity = tokens.Count(t => t.GradientObject.OpportunityLevel > 0.3f) / Math.Max(1f, tokens.Count),
+            Opportunity = tokens.Count(t => t.GradientObject.OpportunityLevel() > 0.3f) / Math.Max(1f, tokens.Count),
             MeanConfidence = superstate.AverageTrust,
             Type = ClassifySuperstate(tokens, threatLevel)
         };
@@ -405,8 +405,8 @@ public sealed class TrustedGradientSystem
     /// </summary>
     private static SuperstateType ClassifySuperstate(List<TrustedToken> tokens, float threatLevel)
     {
-        int threats = tokens.Count(t => t.GradientObject.ThreatLevel > 0.5f && t.IsAuthorized);
-        int opportunities = tokens.Count(t => t.GradientObject.OpportunityLevel > 0.3f && t.IsAuthorized);
+        int threats = tokens.Count(t => t.GradientObject.ThreatLevel() > 0.5f && t.IsAuthorized);
+        int opportunities = tokens.Count(t => t.GradientObject.OpportunityLevel() > 0.3f && t.IsAuthorized);
 
         if (threatLevel > 0.7f || threats > 2)
             return SuperstateType.MultiThreat;
@@ -431,7 +431,7 @@ public sealed class TrustedGradientSystem
         var obj = token.GradientObject;
 
         // High threat - engage or flee
-        if (obj.ThreatLevel > 0.6f)
+        if (obj.ThreatLevel() > 0.6f)
         {
             if (superstate.ThreatLevel > 0.7f)
                 return ActionId.Kite; // Multiple threats - kite
@@ -439,7 +439,7 @@ public sealed class TrustedGradientSystem
         }
 
         // High opportunity - approach or interact
-        if (obj.OpportunityLevel > 0.5f)
+        if (obj.OpportunityLevel() > 0.5f)
         {
             if (threatLevel < 0.3f)
                 return ActionId.Interact;
@@ -535,7 +535,7 @@ public sealed class TrustedSuperstate
     public float ThreatLevel { get; init; }
     public float AverageNovelty { get; init; }
     public float AverageTrust { get; init; }
-    public SuperstateSignature Signature { get; init; }
+    public SuperstateSignature Signature { get; set; }
 }
 
 /// <summary>

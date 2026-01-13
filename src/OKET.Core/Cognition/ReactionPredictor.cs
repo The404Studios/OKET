@@ -83,7 +83,7 @@ public sealed class ReactionPredictor
             {
                 RecommendedReaction = learning.BestReaction,
                 Confidence = learning.Confidence * bestMatchScore,
-                TimeToAct = learning.AverageTimeToAct,
+                TimeToAct = (int)learning.AverageTimeToAct,
                 ExpectedOutcome = learning.AverageOutcome,
                 IsLearned = true,
                 ContextMatch = bestMatchScore
