@@ -74,7 +74,7 @@ public sealed class GameStateFrameAdapter : FrameData
         // Compute flow from intensity change
         ComputeFlow();
 
-        _lastFrame = gameState.Frame;
+        _lastFrame = gameState.FrameId;
     }
 
     private void Clear()
@@ -99,7 +99,7 @@ public sealed class GameStateFrameAdapter : FrameData
         foreach (var detection in detections.Detections)
         {
             // Get bounding box in screen coordinates
-            var box = detection.BoundingBox;
+            var box = detection.Box;
             int left = Math.Clamp((int)box.Left, 0, _width - 1);
             int top = Math.Clamp((int)box.Top, 0, _height - 1);
             int right = Math.Clamp((int)box.Right, 0, _width - 1);
@@ -129,8 +129,8 @@ public sealed class GameStateFrameAdapter : FrameData
             // Add velocity as flow
             if (detection.Velocity != null)
             {
-                float vx = detection.Velocity.X / 100f; // Normalize
-                float vy = detection.Velocity.Y / 100f;
+                float vx = detection.Velocity.Value.X / 100f; // Normalize
+                float vy = detection.Velocity.Value.Y / 100f;
 
                 for (int y = top; y <= bottom; y++)
                 {
@@ -202,8 +202,8 @@ public sealed class GameStateFrameAdapter : FrameData
     private void ProjectAim(AimState aim)
     {
         // Create flow toward aim point
-        int aimX = _width / 2 + (int)(aim.OffsetX / 10f);
-        int aimY = _height / 2 + (int)(aim.OffsetY / 10f);
+        int aimX = _width / 2 + (int)(aim.OffsetToTarget.X / 10f);
+        int aimY = _height / 2 + (int)(aim.OffsetToTarget.Y / 10f);
 
         // Radial flow toward center in a region around aim
         int radius = 100;

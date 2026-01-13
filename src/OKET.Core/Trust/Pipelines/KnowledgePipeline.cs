@@ -352,7 +352,7 @@ public sealed class KnowledgePipeline
     private float ComputeCoherence(KnowledgeClaim claim)
     {
         // Check if claim is internally consistent
-        if (claim.Type == KnowledgeType.Procedure && string.IsNullOrEmpty(claim.Content))
+        if (claim.Type == KnowledgeType.Procedural && string.IsNullOrEmpty(claim.Content))
             return 0.3f;
 
         if (claim.Confidence > 0.9f && claim.ObservationCount < 3)
@@ -364,7 +364,7 @@ public sealed class KnowledgePipeline
     private float ComputeKnowledgeRisk(KnowledgeClaim claim)
     {
         // Procedural knowledge has higher risk (actions have consequences)
-        if (claim.Type == KnowledgeType.Procedure)
+        if (claim.Type == KnowledgeType.Procedural)
             return 0.4f;
 
         // Causal claims can lead to wrong predictions
@@ -636,9 +636,9 @@ public sealed class CertifiedKnowledge
 }
 
 /// <summary>
-/// Internal knowledge entry.
+/// Knowledge entry.
 /// </summary>
-internal sealed class KnowledgeEntry
+public sealed class KnowledgeEntry
 {
     public int Id { get; init; }
     public KnowledgeType Type { get; init; }

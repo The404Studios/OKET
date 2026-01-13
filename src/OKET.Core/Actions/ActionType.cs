@@ -79,4 +79,7 @@ public enum StrategicMode
 
     /// <summary>Recovering from stuck state.</summary>
     Unstick,
+
+    /// <summary>Seeking resources/objectives.</summary>
+    Seek,
 }

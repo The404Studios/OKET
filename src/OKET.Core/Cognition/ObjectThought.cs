@@ -172,7 +172,7 @@ public sealed class ObjectThought
     private int EstimateTimeToAction()
     {
         float distance = Detection.EstimatedDistance ?? 200f;
-        float speed = Detection.Velocity?.Magnitude ?? 50f; // Default zombie speed
+        float speed = Detection.Velocity?.Length ?? 50f; // Default zombie speed
 
         // Time = distance / speed (in frames at ~30fps)
         return (int)Math.Max(1, (distance / Math.Max(1, speed)) * 30);
