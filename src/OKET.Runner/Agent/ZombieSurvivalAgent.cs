@@ -41,6 +41,7 @@ public sealed class ZombieSurvivalAgent : IDisposable
 
     // Actuation
     private readonly IInputController _inputController;
+    private readonly Win32Input _win32Input;
     private readonly SmoothMouseController _mouseController;
 
     // Logging
@@ -82,9 +83,9 @@ public sealed class ZombieSurvivalAgent : IDisposable
         _worldModel = new WorldModel();
         _safetyLayer = new SafetyLayer();
 
-        var win32Input = new Win32Input();
-        _inputController = win32Input;
-        _mouseController = new SmoothMouseController(win32Input);
+        _win32Input = new Win32Input();
+        _inputController = _win32Input;
+        _mouseController = new SmoothMouseController(_win32Input);
 
         _episodeLogger = new EpisodeLogger(config.LogDirectory);
         _perfMonitor = new PerformanceMonitor();
@@ -125,11 +126,15 @@ public sealed class ZombieSurvivalAgent : IDisposable
         _isRunning = true;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
-        // Initialize overlay if enabled
-        if (_enableOverlay)
+        // Initialize overlay and set input target window
+        var targetWindow = FindGameWindow();
+        if (targetWindow != IntPtr.Zero)
         {
-            var targetWindow = FindGameWindow();
-            if (targetWindow != IntPtr.Zero)
+            // Set input target window for focus management
+            _win32Input.SetTargetWindow(targetWindow);
+            _logger.LogInformation("Input target window set: {Handle:X}", targetWindow);
+
+            if (_enableOverlay)
             {
                 _overlayWindow = new OverlayWindow(targetWindow,
                     _frameSource.Resolution.Width,
@@ -137,10 +142,10 @@ public sealed class ZombieSurvivalAgent : IDisposable
                 _overlayWindow.Show();
                 _logger.LogInformation("Debug overlay initialized");
             }
-            else
-            {
-                _logger.LogWarning("Could not find game window for overlay");
-            }
+        }
+        else
+        {
+            _logger.LogWarning("Could not find game window - input may not work correctly");
         }
 
         _logger.LogInformation("Agent started successfully");
@@ -254,6 +259,8 @@ public sealed class ZombieSurvivalAgent : IDisposable
         // 6. Actuation: Execute plan
         if (_config.EnableInput)
         {
+            // Ensure game window is focused before sending input
+            _win32Input.EnsureFocus();
             _inputController.Execute(safePlan);
         }
 
