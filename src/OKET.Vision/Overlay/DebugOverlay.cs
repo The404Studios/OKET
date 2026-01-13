@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using OKET.Core.Navigation;
 using OKET.Core.Types;
 using OKET.Core.Policy;
+using OKET.Core.Intelligence;
 using DetectionClass = OKET.Core.Detection.Detection;
 using DetectionResult = OKET.Core.Detection.DetectionResult;
 
@@ -187,6 +188,49 @@ public sealed class DebugOverlay : IDisposable
     public void UpdateDetections(DetectionResult detectionResult)
     {
         UpdateDetections(detectionResult.Detections);
+    }
+
+    /// <summary>
+    /// Update detections from intelligent detections (new unified system).
+    /// This is the preferred method for the new intelligence pipeline.
+    /// </summary>
+    public void UpdateIntelligentDetections(IEnumerable<IntelligentDetection> detections)
+    {
+        _detections.Clear();
+
+        foreach (var det in detections)
+        {
+            _detections.Add(new DetectionVisualization
+            {
+                TrackId = det.TrackId,
+                ClassName = det.ClassName,
+                Confidence = det.Confidence,
+                Box = det.BoundingBox,
+                Velocity = det.Velocity,
+                Priority = det.Priority,
+                IsThreat = det.IsThreat,
+                Color = det.RenderColor
+            });
+        }
+    }
+
+    /// <summary>
+    /// Update from an intelligence frame (includes all context).
+    /// </summary>
+    public void UpdateFromIntelligenceFrame(IntelligenceFrame frame)
+    {
+        UpdateIntelligentDetections(frame.Detections);
+
+        // Update debug state with intelligence frame info
+        _debugState = new DebugState
+        {
+            IntentType = frame.RecommendedAction.Type.ToString(),
+            IntentReason = frame.RecommendedAction.Reason,
+            Confidence = frame.Confidence,
+            ThreatCount = frame.ThreatCount,
+            ActiveSkill = "Intelligence",
+            ChosenAction = frame.RecommendedAction.Type.ToString()
+        };
     }
 
     /// <summary>

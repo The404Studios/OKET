@@ -364,6 +364,9 @@ public readonly struct CertificateContext
     public float GateGain { get; init; }
     public int TargetPrototypeId { get; init; }
     public string? TargetName { get; init; }
+    public bool HasAmmo { get; init; }
+    public bool InCombat { get; init; }
+    public Dictionary<string, float>? CustomData { get; init; }
 }
 
 /// <summary>

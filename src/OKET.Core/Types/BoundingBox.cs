@@ -60,6 +60,46 @@ public readonly struct BoundingBox : IEquatable<BoundingBox>
     public bool Intersects(BoundingBox other) =>
         !(other.Left > Right || other.Right < Left || other.Top > Bottom || other.Bottom < Top);
 
+    /// <summary>
+    /// Calculate Intersection over Union (IoU) with another box.
+    /// Returns 0-1 where 1 is perfect overlap.
+    /// </summary>
+    public float IoU(BoundingBox other)
+    {
+        // Calculate intersection
+        float interLeft = Math.Max(Left, other.Left);
+        float interTop = Math.Max(Top, other.Top);
+        float interRight = Math.Min(Right, other.Right);
+        float interBottom = Math.Min(Bottom, other.Bottom);
+
+        float interWidth = Math.Max(0, interRight - interLeft);
+        float interHeight = Math.Max(0, interBottom - interTop);
+        float interArea = interWidth * interHeight;
+
+        // Calculate union
+        float unionArea = Area + other.Area - interArea;
+
+        return unionArea > 0 ? interArea / unionArea : 0;
+    }
+
+    /// <summary>
+    /// Expand the box by a given margin on all sides.
+    /// </summary>
+    public BoundingBox Expand(float margin) =>
+        new(X - margin, Y - margin, Width + margin * 2, Height + margin * 2);
+
+    /// <summary>
+    /// Scale the box by a factor around its center.
+    /// </summary>
+    public BoundingBox Scale(float factor)
+    {
+        float newWidth = Width * factor;
+        float newHeight = Height * factor;
+        float cx = X + Width / 2;
+        float cy = Y + Height / 2;
+        return new BoundingBox(cx - newWidth / 2, cy - newHeight / 2, newWidth, newHeight);
+    }
+
     public static BoundingBox FromCenterSize(Vector2 center, Vector2 size) =>
         new(center.X - size.X / 2, center.Y - size.Y / 2, size.X, size.Y);
 
