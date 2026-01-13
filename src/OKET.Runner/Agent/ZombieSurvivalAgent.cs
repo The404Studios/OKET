@@ -331,20 +331,38 @@ public sealed class ZombieSurvivalAgent : IDisposable
             var outcome = CalculateOutcome(state);
             var debugState = new DebugState
             {
+                // Intent layer
                 IntentType = pipelineState.Intent.ToString(),
                 IntentReason = pipelineState.IntentReason.Length > 0
                     ? pipelineState.IntentReason
                     : (state.ThreatsInFov > 0
                         ? $"{state.ThreatsInFov} threats, {state.NearestThreatDistance:F0}px"
                         : "No threats"),
+                IntentPriority = intentDecision.Confidence,
+                IntentUrgency = state.DangerLevel,
+
+                // Policy layer
+                PolicyName = pipelineState.PolicyName,
+                PolicyStatus = "Executing",
                 Confidence = confidence,
+
+                // Action layer
                 ActiveSkill = pipelineState.PolicySkill,
+                ActionType = mode.ToString(),
                 ChosenAction = $"{recommendation} | {tokens.Count} tokens",
+
+                // Feedback
                 PredictionError = predictionError,
+                IsPredictionReliable = _errorSignal.IsPredictionReliable,
                 LastReward = outcome.Reward,
+                TokenCount = tokens.Count,
+                TrackedEntities = state.Detections.Detections.Count,
+
+                // State
                 ThreatCount = state.ThreatsInFov,
                 Health = state.Hud.Health,
-                Fps = _perfMonitor.CurrentFps
+                Ammo = state.Hud.MaxAmmo > 0 ? (int)(state.Hud.Ammo * 100f / state.Hud.MaxAmmo) : 100,
+                Fps = (float)_perfMonitor.CurrentFps
             };
             debugOverlay.UpdateDebugState(debugState);
 

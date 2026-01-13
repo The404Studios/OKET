@@ -282,53 +282,85 @@ public sealed class DebugOverlay : IDisposable
     {
         const int panelX = 10;
         const int panelY = 10;
-        const int panelWidth = 280;
-        const int lineHeight = 18;
+        const int panelWidth = 320;
+        const int lineHeight = 16;
         const int padding = 8;
+        const int sectionGap = 4;
 
-        var lines = new List<(string text, Color color)>
+        var lines = new List<(string text, Color color, bool isSectionHeader)>
         {
-            ($"OKET AGI v0.1", Color.Cyan),
-            ($"─────────────────────────", Color.Gray),
-            ($"Intent: {_debugState.IntentType}", GetIntentColor(_debugState.IntentType)),
-            ($"  └─ {_debugState.IntentReason}", Color.LightGray),
-            ($"Confidence: {_debugState.Confidence:P0}", GetConfidenceColor(_debugState.Confidence)),
-            ($"─────────────────────────", Color.Gray),
-            ($"Skill: {_debugState.ActiveSkill}", Color.White),
-            ($"Action: {_debugState.ChosenAction}", Color.Yellow),
-            ($"─────────────────────────", Color.Gray),
-            ($"Prediction Error: {_debugState.PredictionError:F1}px", GetErrorColor(_debugState.PredictionError)),
-            ($"Reward: {_debugState.LastReward:+0.00;-0.00}", GetRewardColor(_debugState.LastReward)),
-            ($"─────────────────────────", Color.Gray),
-            ($"Threats: {_debugState.ThreatCount}", _debugState.ThreatCount > 0 ? Color.Red : Color.Green),
-            ($"Health: {_debugState.Health}%", GetHealthColor(_debugState.Health)),
-            ($"FPS: {_debugState.Fps:F0}", Color.White)
+            // Header
+            ("═══════ OKET AGI v1.0 ═══════", Color.Cyan, true),
+
+            // Intent Section
+            ("▌INTENT", Color.FromArgb(255, 100, 180, 255), true),
+            ($"  Type: {_debugState.IntentType}", GetIntentColor(_debugState.IntentType), false),
+            ($"  Reason: {TruncateString(_debugState.IntentReason, 28)}", Color.FromArgb(200, 180, 180, 180), false),
+            ($"  Priority: {_debugState.IntentPriority:P0}  Urgency: {_debugState.IntentUrgency:P0}", Color.LightGray, false),
+
+            // Policy Section
+            ("▌POLICY", Color.FromArgb(255, 255, 180, 100), true),
+            ($"  Name: {_debugState.PolicyName}", Color.White, false),
+            ($"  Status: {_debugState.PolicyStatus}", GetStatusColor(_debugState.PolicyStatus), false),
+            ($"  Confidence: {_debugState.Confidence:P0}", GetConfidenceColor(_debugState.Confidence), false),
+
+            // Action Section
+            ("▌ACTION", Color.FromArgb(255, 180, 255, 100), true),
+            ($"  Skill: {_debugState.ActiveSkill}", Color.White, false),
+            ($"  Type: {_debugState.ActionType}", Color.Yellow, false),
+            ($"  Desc: {TruncateString(_debugState.ChosenAction, 28)}", Color.FromArgb(200, 255, 255, 150), false),
+
+            // Feedback Section
+            ("▌FEEDBACK", Color.FromArgb(255, 255, 100, 180), true),
+            ($"  Pred Error: {_debugState.PredictionError:F1}px {(_debugState.IsPredictionReliable ? "✓" : "✗")}", GetErrorColor(_debugState.PredictionError), false),
+            ($"  Reward: {_debugState.LastReward:+0.00;-0.00;0.00}", GetRewardColor(_debugState.LastReward), false),
+            ($"  Tokens: {_debugState.TokenCount}  Entities: {_debugState.TrackedEntities}", Color.LightGray, false),
+
+            // State Section
+            ("▌STATE", Color.FromArgb(255, 100, 255, 180), true),
+            ($"  Threats: {_debugState.ThreatCount}", _debugState.ThreatCount > 0 ? Color.Red : Color.LimeGreen, false),
+            ($"  Health: {_debugState.Health}%  Ammo: {_debugState.Ammo}%", GetHealthColor(_debugState.Health), false),
+            ($"  FPS: {_debugState.Fps:F0}", _debugState.Fps >= 30 ? Color.White : Color.Orange, false)
         };
 
-        int panelHeight = (lines.Count * lineHeight) + (padding * 2);
+        int panelHeight = padding * 2;
+        foreach (var (_, _, isHeader) in lines)
+        {
+            panelHeight += isHeader ? lineHeight + sectionGap : lineHeight;
+        }
 
-        // Draw panel background
-        using var bgBrush = new SolidBrush(PanelBackground);
-        using var borderPen = new Pen(PanelBorder, 1);
+        // Draw panel background with gradient
+        using var bgBrush = new SolidBrush(Color.FromArgb(220, 15, 15, 20));
+        using var borderPen = new Pen(Color.FromArgb(200, 60, 60, 80), 2);
         g.FillRectangle(bgBrush, panelX, panelY, panelWidth, panelHeight);
         g.DrawRectangle(borderPen, panelX, panelY, panelWidth, panelHeight);
 
+        // Draw accent line
+        using var accentPen = new Pen(Color.Cyan, 3);
+        g.DrawLine(accentPen, panelX, panelY, panelX, panelY + panelHeight);
+
         // Draw lines
-        using var font = new Font("Consolas", 10, FontStyle.Regular);
+        using var font = new Font("Consolas", 9, FontStyle.Regular);
+        using var headerFont = new Font("Consolas", 9, FontStyle.Bold);
         int y = panelY + padding;
 
-        foreach (var (text, color) in lines)
+        foreach (var (text, color, isHeader) in lines)
         {
+            if (isHeader && y > panelY + padding + lineHeight)
+            {
+                y += sectionGap;
+            }
+
             using var brush = new SolidBrush(color);
-            g.DrawString(text, font, brush, panelX + padding, y);
+            g.DrawString(text, isHeader ? headerFont : font, brush, panelX + padding, y);
             y += lineHeight;
         }
 
-        // Draw confidence bar
+        // Draw confidence bar at bottom
         int barX = panelX + padding;
         int barY = panelY + panelHeight + 5;
         int barWidth = panelWidth - (padding * 2);
-        int barHeight = 6;
+        int barHeight = 4;
 
         using var barBgBrush = new SolidBrush(Color.FromArgb(100, 40, 40, 40));
         g.FillRectangle(barBgBrush, barX, barY, barWidth, barHeight);
@@ -336,6 +368,25 @@ public sealed class DebugOverlay : IDisposable
         int fillWidth = (int)(barWidth * Math.Clamp(_debugState.Confidence, 0f, 1f));
         using var barFillBrush = new SolidBrush(GetConfidenceColor(_debugState.Confidence));
         g.FillRectangle(barFillBrush, barX, barY, fillWidth, barHeight);
+    }
+
+    private static string TruncateString(string s, int maxLen)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        return s.Length <= maxLen ? s : s.Substring(0, maxLen - 3) + "...";
+    }
+
+    private static Color GetStatusColor(string status)
+    {
+        return status.ToLower() switch
+        {
+            "executing" => Color.LimeGreen,
+            "proposed" => Color.Yellow,
+            "blocked" => Color.Orange,
+            "completed" => Color.Cyan,
+            "failed" => Color.Red,
+            _ => Color.Gray
+        };
     }
 
     private static Color GetIntentColor(string intentType)
@@ -757,17 +808,35 @@ public sealed class DebugState
     /// <summary>Reason for current intent.</summary>
     public string IntentReason { get; init; } = "";
 
+    /// <summary>Intent priority [0, 1].</summary>
+    public float IntentPriority { get; init; }
+
+    /// <summary>Intent urgency [0, 1].</summary>
+    public float IntentUrgency { get; init; }
+
     /// <summary>Overall confidence [0, 1].</summary>
     public float Confidence { get; init; } = 1f;
 
+    /// <summary>Current policy name.</summary>
+    public string PolicyName { get; init; } = "None";
+
+    /// <summary>Policy status (Proposed, Executing, Blocked, etc).</summary>
+    public string PolicyStatus { get; init; } = "Idle";
+
     /// <summary>Currently active skill name.</summary>
     public string ActiveSkill { get; init; } = "None";
+
+    /// <summary>Chosen action type.</summary>
+    public string ActionType { get; init; } = "Idle";
 
     /// <summary>Chosen action description.</summary>
     public string ChosenAction { get; init; } = "None";
 
     /// <summary>Last prediction error in pixels.</summary>
     public float PredictionError { get; init; }
+
+    /// <summary>Whether predictions are reliable.</summary>
+    public bool IsPredictionReliable { get; init; } = true;
 
     /// <summary>Last frame's total reward.</summary>
     public float LastReward { get; init; }
@@ -778,6 +847,9 @@ public sealed class DebugState
     /// <summary>Current health percentage.</summary>
     public int Health { get; init; } = 100;
 
+    /// <summary>Current ammo percentage.</summary>
+    public int Ammo { get; init; } = 100;
+
     /// <summary>Current FPS.</summary>
     public float Fps { get; init; }
 
@@ -786,4 +858,10 @@ public sealed class DebugState
 
     /// <summary>Distance to current goal.</summary>
     public float DistanceToGoal { get; init; }
+
+    /// <summary>Token count this frame.</summary>
+    public int TokenCount { get; init; }
+
+    /// <summary>Tracked entity count.</summary>
+    public int TrackedEntities { get; init; }
 }
