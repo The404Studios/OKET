@@ -322,7 +322,7 @@ public sealed class TrustedGradientBridge
 
         // Get trust-based recommendation (from signed action)
         ActionId trustedAction = trustedResult.RecommendedAction;
-        float trustedConf = trustedResult.SigningResult?.Confidence ?? 0.5f;
+        float trustedConf = trustedResult.SigningResult?.AuthorizationScore ?? 0.5f;
         bool isSigned = trustedResult.SigningResult?.IsSigned == true;
 
         // CORE PRINCIPLE: Signed actions are trusted overrides
