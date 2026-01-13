@@ -5,6 +5,11 @@ using OKET.Core.Types;
 using OKET.Core.State;
 using OKET.Core.Actions;
 using OKET.Core.Interfaces;
+using OKET.Core.Detection;
+using OKET.Core.Prediction;
+using OKET.Core.Tokens;
+using OKET.Core.Feedback;
+using OKET.Core.Policy;
 using OKET.Agent.State;
 using OKET.Agent.Memory;
 using OKET.Agent.Decision;
@@ -31,8 +36,16 @@ public sealed class ZombieSurvivalAgent : IDisposable
     private readonly IFrameSource _frameSource;
     private readonly IHudParser _hudParser;
     private readonly IObjectDetector _detector;
+    private readonly DistanceEstimator _distanceEstimator;
 
-    // Decision
+    // Intelligence Layer (Phase 2)
+    private readonly FramePredictor _framePredictor;
+    private readonly TokenEmitter _tokenEmitter;
+    private readonly PredictionErrorSignal _errorSignal;
+    private readonly IntentPolicyPipeline _intentPipeline;
+    private FramePrediction? _lastPrediction;
+
+    // Decision (legacy, kept for fallback)
     private readonly IPolicy _policy;
     private readonly SkillExecutor _skillExecutor;
     private readonly IStateBuilder _stateBuilder;
@@ -76,6 +89,15 @@ public sealed class ZombieSurvivalAgent : IDisposable
         _detector = config.UseNeuralDetector && !string.IsNullOrEmpty(config.DetectorModelPath)
             ? new OnnxObjectDetector()
             : new MotionDetector(); // Use motion detection to track any moving objects
+
+        // Initialize distance estimator (will be configured with screen size after frame source starts)
+        _distanceEstimator = new DistanceEstimator(new Vector2(1920, 1080));
+
+        // Initialize Phase 2 intelligence layer
+        _framePredictor = new FramePredictor();
+        _tokenEmitter = new TokenEmitter();
+        _errorSignal = new PredictionErrorSignal();
+        _intentPipeline = new IntentPolicyPipeline();
 
         _policy = new RuleBasedPolicy();
         _skillExecutor = new SkillExecutor();
@@ -235,6 +257,9 @@ public sealed class ZombieSurvivalAgent : IDisposable
         // Run object detection
         var detections = await _detector.DetectAsync(frame, ct);
 
+        // Update distance estimates for all detections
+        _distanceEstimator.UpdateDistances(detections);
+
         var perceptionTime = sw.ElapsedMilliseconds;
         _perfMonitor.RecordPerceptionTime(perceptionTime);
         sw.Restart();
@@ -245,19 +270,42 @@ public sealed class ZombieSurvivalAgent : IDisposable
         // 3. World Model Update: Track targets
         _worldModel.Update(state);
 
-        // 4. Decision: Determine what to do
-        var (mode, confidence) = _policy.Decide(state);
+        // 4. Prediction: Evaluate last prediction and make new one
+        float predictionError = 0f;
+        if (_lastPrediction != null && _lastState != null)
+        {
+            _framePredictor.EvaluatePrediction(_lastPrediction, state);
+            predictionError = _framePredictor.LastPredictionError;
+            _errorSignal.RecordError(predictionError, state.FrameId, _intentPipeline.CurrentPolicy?.ActiveSkill);
+        }
+        _framePredictor.RecordFrame(state);
+        _lastPrediction = _framePredictor.PredictNext(state);
+
+        // 5. Tokenization: Emit perception tokens (only significant changes)
+        var tokens = _tokenEmitter.EmitTokens(state).ToList();
+
+        // 6. Decision: Use Intent Pipeline (Phase 2) with error-driven behavior
+        var intentDecision = _intentPipeline.Update(state, tokens);
+        var behaviorMod = _errorSignal.Modifier;
+
+        // Get legacy decision for comparison/fallback
+        var (mode, legacyConfidence) = _policy.Decide(state);
+
+        // Blend confidence with error signal
+        float confidence = intentDecision.Confidence * behaviorMod.AggressionMultiplier;
+
+        // Execute plan based on intent policy
         var plan = _skillExecutor.Execute(state, mode);
 
         var decisionTime = sw.ElapsedMilliseconds;
         _perfMonitor.RecordDecisionTime(decisionTime);
         sw.Restart();
 
-        // 5. Safety: Validate plan
+        // 7. Safety: Validate plan
         var safePlan = _safetyLayer.Validate(plan, state);
 
-        // 6. Actuation: Execute plan
-        if (_config.EnableInput)
+        // 8. Actuation: Execute plan (modified by error signal)
+        if (_config.EnableInput && !behaviorMod.ShouldInterrupt)
         {
             // Ensure game window is focused before sending input
             _win32Input.EnsureFocus();
@@ -267,7 +315,7 @@ public sealed class ZombieSurvivalAgent : IDisposable
         var actuationTime = sw.ElapsedMilliseconds;
         _perfMonitor.RecordActuationTime(actuationTime);
 
-        // 7. Update Overlay
+        // 9. Update Overlay
         if (_overlayWindow != null)
         {
             var debugOverlay = _overlayWindow.DebugOverlay;
@@ -275,18 +323,24 @@ public sealed class ZombieSurvivalAgent : IDisposable
             // Update detections visualization - pass all detections
             debugOverlay.UpdateDetections(state.Detections);
 
+            // Get behavior recommendation from error signal
+            var recommendation = _errorSignal.GetRecommendation();
+            var pipelineState = _intentPipeline.GetState();
+
             // Update debug state for panel display
             var outcome = CalculateOutcome(state);
             var debugState = new DebugState
             {
-                IntentType = mode.ToString(),
-                IntentReason = state.ThreatsInFov > 0
-                    ? $"{state.ThreatsInFov} threats, {state.NearestThreatDistance:F0}px away"
-                    : "No threats detected",
+                IntentType = pipelineState.Intent.ToString(),
+                IntentReason = pipelineState.IntentReason.Length > 0
+                    ? pipelineState.IntentReason
+                    : (state.ThreatsInFov > 0
+                        ? $"{state.ThreatsInFov} threats, {state.NearestThreatDistance:F0}px"
+                        : "No threats"),
                 Confidence = confidence,
-                ActiveSkill = plan?.GetType().Name ?? "None",
-                ChosenAction = plan?.ToString()?.Split('.').LastOrDefault() ?? "Idle",
-                PredictionError = 0f,
+                ActiveSkill = pipelineState.PolicySkill,
+                ChosenAction = $"{recommendation} | {tokens.Count} tokens",
+                PredictionError = predictionError,
                 LastReward = outcome.Reward,
                 ThreatCount = state.ThreatsInFov,
                 Health = state.Hud.Health,
@@ -299,6 +353,18 @@ public sealed class ZombieSurvivalAgent : IDisposable
             {
                 var threat = state.Detections.PrimaryThreat;
                 debugOverlay.AddMarker(threat.Box.Center, MarkerType.Target, "TARGET", 0.1f);
+            }
+
+            // Add predicted positions
+            if (_lastPrediction != null)
+            {
+                foreach (var pred in _lastPrediction.PredictedPositions.Values.Take(3))
+                {
+                    if (pred.Confidence > 0.5f)
+                    {
+                        debugOverlay.AddMarker(pred.PredictedPosition, MarkerType.Waypoint, "PRED", 0.05f);
+                    }
+                }
             }
 
             // Update navigation path visualization
