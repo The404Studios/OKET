@@ -3,6 +3,7 @@ using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using OKET.Core.Navigation;
 using OKET.Core.Types;
+using OKET.Core.Policy;
 using DetectionClass = OKET.Core.Detection.Detection;
 using DetectionResult = OKET.Core.Detection.DetectionResult;
 
@@ -27,6 +28,9 @@ public sealed class DebugOverlay : IDisposable
     private readonly List<TextVisualization> _texts = new();
     private readonly List<DetectionVisualization> _detections = new();
 
+    // Debug state (shown in corner panel)
+    private DebugState _debugState = new();
+
     // Colors
     private static readonly Color PathColor = Color.FromArgb(180, 0, 150, 255); // Blue
     private static readonly Color NavMeshColor = Color.FromArgb(80, 0, 255, 100); // Green
@@ -41,6 +45,10 @@ public sealed class DebugOverlay : IDisposable
     private static readonly Color ItemColor = Color.FromArgb(220, 50, 255, 50); // Green
     private static readonly Color SurvivorColor = Color.FromArgb(220, 50, 150, 255); // Blue
     private static readonly Color UnknownColor = Color.FromArgb(180, 200, 200, 200); // Gray
+
+    // Panel colors
+    private static readonly Color PanelBackground = Color.FromArgb(200, 20, 20, 20);
+    private static readonly Color PanelBorder = Color.FromArgb(200, 60, 60, 60);
 
     public bool IsEnabled
     {
@@ -256,7 +264,124 @@ public sealed class DebugOverlay : IDisposable
             DrawDetection(graphics, detection);
         }
 
+        // Draw debug panel (top-left corner)
+        DrawDebugPanel(graphics);
+
         return bitmap;
+    }
+
+    /// <summary>
+    /// Update debug state for overlay panel.
+    /// </summary>
+    public void UpdateDebugState(DebugState state)
+    {
+        _debugState = state;
+    }
+
+    private void DrawDebugPanel(Graphics g)
+    {
+        const int panelX = 10;
+        const int panelY = 10;
+        const int panelWidth = 280;
+        const int lineHeight = 18;
+        const int padding = 8;
+
+        var lines = new List<(string text, Color color)>
+        {
+            ($"OKET Agent v0.1", Color.Cyan),
+            ($"─────────────────────────", Color.Gray),
+            ($"Intent: {_debugState.IntentType}", GetIntentColor(_debugState.IntentType)),
+            ($"  └─ {_debugState.IntentReason}", Color.LightGray),
+            ($"Confidence: {_debugState.Confidence:P0}", GetConfidenceColor(_debugState.Confidence)),
+            ($"─────────────────────────", Color.Gray),
+            ($"Skill: {_debugState.ActiveSkill}", Color.White),
+            ($"Action: {_debugState.ChosenAction}", Color.Yellow),
+            ($"─────────────────────────", Color.Gray),
+            ($"Prediction Error: {_debugState.PredictionError:F1}px", GetErrorColor(_debugState.PredictionError)),
+            ($"Reward: {_debugState.LastReward:+0.00;-0.00}", GetRewardColor(_debugState.LastReward)),
+            ($"─────────────────────────", Color.Gray),
+            ($"Threats: {_debugState.ThreatCount}", _debugState.ThreatCount > 0 ? Color.Red : Color.Green),
+            ($"Health: {_debugState.Health}%", GetHealthColor(_debugState.Health)),
+            ($"FPS: {_debugState.Fps:F0}", Color.White)
+        };
+
+        int panelHeight = (lines.Count * lineHeight) + (padding * 2);
+
+        // Draw panel background
+        using var bgBrush = new SolidBrush(PanelBackground);
+        using var borderPen = new Pen(PanelBorder, 1);
+        g.FillRectangle(bgBrush, panelX, panelY, panelWidth, panelHeight);
+        g.DrawRectangle(borderPen, panelX, panelY, panelWidth, panelHeight);
+
+        // Draw lines
+        using var font = new Font("Consolas", 10, FontStyle.Regular);
+        int y = panelY + padding;
+
+        foreach (var (text, color) in lines)
+        {
+            using var brush = new SolidBrush(color);
+            g.DrawString(text, font, brush, panelX + padding, y);
+            y += lineHeight;
+        }
+
+        // Draw confidence bar
+        int barX = panelX + padding;
+        int barY = panelY + panelHeight + 5;
+        int barWidth = panelWidth - (padding * 2);
+        int barHeight = 6;
+
+        using var barBgBrush = new SolidBrush(Color.FromArgb(100, 40, 40, 40));
+        g.FillRectangle(barBgBrush, barX, barY, barWidth, barHeight);
+
+        int fillWidth = (int)(barWidth * Math.Clamp(_debugState.Confidence, 0f, 1f));
+        using var barFillBrush = new SolidBrush(GetConfidenceColor(_debugState.Confidence));
+        g.FillRectangle(barFillBrush, barX, barY, fillWidth, barHeight);
+    }
+
+    private static Color GetIntentColor(string intentType)
+    {
+        return intentType.ToLower() switch
+        {
+            "idle" => Color.Gray,
+            "survive" => Color.Yellow,
+            "engage" => Color.Red,
+            "navigate" => Color.Cyan,
+            "retreat" => Color.Orange,
+            "acquire" => Color.Green,
+            _ => Color.White
+        };
+    }
+
+    private static Color GetConfidenceColor(float confidence)
+    {
+        if (confidence >= 0.8f) return Color.LimeGreen;
+        if (confidence >= 0.5f) return Color.Yellow;
+        if (confidence >= 0.3f) return Color.Orange;
+        return Color.Red;
+    }
+
+    private static Color GetErrorColor(float error)
+    {
+        if (error < 10f) return Color.LimeGreen;
+        if (error < 30f) return Color.Yellow;
+        if (error < 50f) return Color.Orange;
+        return Color.Red;
+    }
+
+    private static Color GetRewardColor(float reward)
+    {
+        if (reward > 0.5f) return Color.LimeGreen;
+        if (reward > 0f) return Color.Green;
+        if (reward > -0.5f) return Color.Orange;
+        return Color.Red;
+    }
+
+    private static Color GetHealthColor(int health)
+    {
+        if (health >= 75) return Color.LimeGreen;
+        if (health >= 50) return Color.Yellow;
+        if (health >= 25) return Color.Orange;
+        return Color.Red;
     }
 
     /// <summary>
@@ -618,4 +743,47 @@ internal class DetectionVisualization
     public float Priority { get; init; }
     public bool IsThreat { get; init; }
     public Color Color { get; init; }
+}
+
+/// <summary>
+/// Debug state for overlay panel display.
+/// If it's not visible, it's not debuggable.
+/// </summary>
+public sealed class DebugState
+{
+    /// <summary>Current intent type name.</summary>
+    public string IntentType { get; init; } = "Idle";
+
+    /// <summary>Reason for current intent.</summary>
+    public string IntentReason { get; init; } = "";
+
+    /// <summary>Overall confidence [0, 1].</summary>
+    public float Confidence { get; init; } = 1f;
+
+    /// <summary>Currently active skill name.</summary>
+    public string ActiveSkill { get; init; } = "None";
+
+    /// <summary>Chosen action description.</summary>
+    public string ChosenAction { get; init; } = "None";
+
+    /// <summary>Last prediction error in pixels.</summary>
+    public float PredictionError { get; init; }
+
+    /// <summary>Last frame's total reward.</summary>
+    public float LastReward { get; init; }
+
+    /// <summary>Current threat count.</summary>
+    public int ThreatCount { get; init; }
+
+    /// <summary>Current health percentage.</summary>
+    public int Health { get; init; } = 100;
+
+    /// <summary>Current FPS.</summary>
+    public float Fps { get; init; }
+
+    /// <summary>Navigation policy status.</summary>
+    public string NavStatus { get; init; } = "Idle";
+
+    /// <summary>Distance to current goal.</summary>
+    public float DistanceToGoal { get; init; }
 }
