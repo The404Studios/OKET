@@ -25,6 +25,9 @@ public sealed class AimState
     /// <summary>How long we've been tracking this target (ms).</summary>
     public float TrackingDuration { get; init; }
 
+    /// <summary>Quality of tracking [0, 1]. Higher = more stable tracking.</summary>
+    public float TrackingQuality { get; init; }
+
     /// <summary>Recent hit marker detected.</summary>
     public bool HitConfirmed { get; init; }
 
@@ -38,6 +41,7 @@ public sealed class AimState
         OffsetToTarget = Vector2.Zero,
         IsOnTarget = false,
         TrackingDuration = 0,
+        TrackingQuality = 0,
         HitConfirmed = false
     };
 }

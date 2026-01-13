@@ -303,8 +303,8 @@ public sealed class GameStateToken
     public byte UrgencyToken { get; init; } // 0-10 scale
 
     // Deltas from previous frame
-    public sbyte HealthDeltaToken { get; init; }
-    public sbyte ThreatDeltaToken { get; init; }
+    public sbyte HealthDeltaToken { get; set; }
+    public sbyte ThreatDeltaToken { get; set; }
 
     /// <summary>
     /// Get token as a fixed-size vector for ML input.

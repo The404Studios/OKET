@@ -451,10 +451,10 @@ public sealed class MotionDetector : IObjectDetector
 
     private static float CalculateIoU(BoundingBox a, BoundingBox b)
     {
-        int x1 = Math.Max(a.X, b.X);
-        int y1 = Math.Max(a.Y, b.Y);
-        int x2 = Math.Min(a.X + a.Width, b.X + b.Width);
-        int y2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
+        float x1 = Math.Max(a.X, b.X);
+        float y1 = Math.Max(a.Y, b.Y);
+        float x2 = Math.Min(a.X + a.Width, b.X + b.Width);
+        float y2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
 
         if (x2 <= x1 || y2 <= y1) return 0;
 

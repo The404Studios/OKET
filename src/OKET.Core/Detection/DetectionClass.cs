@@ -23,8 +23,11 @@ public enum DetectionClass
     HealthKit = 15,
 
     // Players
-    Survivor = 20,
-    SurvivorHead = 21,
+    Player = 20,
+    PlayerHead = 21,
+    Teammate = 22,
+    Survivor = 23,
+    SurvivorHead = 24,
 
     // UI elements
     Crosshair = 30,
