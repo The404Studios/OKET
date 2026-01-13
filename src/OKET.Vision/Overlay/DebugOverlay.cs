@@ -1,9 +1,10 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
-using OKET.Core.Detection;
 using OKET.Core.Navigation;
 using OKET.Core.Types;
+using DetectionClass = OKET.Core.Detection.Detection;
+using DetectionResult = OKET.Core.Detection.DetectionResult;
 
 namespace OKET.Vision.Overlay;
 
@@ -151,7 +152,7 @@ public sealed class DebugOverlay : IDisposable
     /// <summary>
     /// Update detections from game state. Call this every frame.
     /// </summary>
-    public void UpdateDetections(IEnumerable<Detection> detections)
+    public void UpdateDetections(IEnumerable<DetectionClass> detections)
     {
         _detections.Clear();
 
@@ -177,13 +178,13 @@ public sealed class DebugOverlay : IDisposable
     /// </summary>
     public void UpdateDetections(DetectionResult detectionResult)
     {
-        UpdateDetections(detectionResult.All);
+        UpdateDetections(detectionResult.Detections);
     }
 
     /// <summary>
     /// Add a single detection.
     /// </summary>
-    public void AddDetection(Detection detection)
+    public void AddDetection(DetectionClass detection)
     {
         var className = detection.Class.ToString();
         _detections.Add(new DetectionVisualization
